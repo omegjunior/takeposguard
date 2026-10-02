@@ -54,6 +54,18 @@ class TakeposguardStorage
 			.$this->scope($invoiceId, $token));
 	}
 
+	/** @return object|null|false Entity-scoped token owner, including another invoice */
+	public function fetchTokenOwner($token)
+	{
+		$this->error = '';
+		$token = self::normalizeToken($token);
+		if ($token === false) {
+			return $this->fail('TakeposguardInvalidIdentity');
+		}
+		return $this->fetchOne('SELECT fk_invoice, status FROM '.MAIN_DB_PREFIX.'takeposguard_payment_attempt'
+			.' WHERE entity = '.$this->entity.' AND operation_token = '.$this->quote($token));
+	}
+
 	/** @return object|null|false Lock metadata; does not acquire or recover a lock */
 	public function fetchInvoiceLock($invoiceId)
 	{

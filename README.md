@@ -2,9 +2,9 @@
 
 Module externe indépendant installé dans `htdocs/custom/takeposguard`, sans modification du cœur Dolibarr.
 
-## État de la version 0.3.0
+## État de la version 0.4.0
 
-Cette version implémente les points 1 à 3 : configuration, droits, stockage et gestionnaire de verrou exclusif. **Elle ne protège pas encore les paiements**, même si l'option est activée. Le gestionnaire n'est pas encore appelé par les hooks TakePOS. Le JavaScript déclaré reste sans traitement jusqu'aux étapes suivantes. Aucun trigger n'est ajouté.
+Cette version implémente les points 1 à 4 : configuration, stockage, verrou exclusif et interception serveur `doActions()`. **Elle reste intermédiaire et ne doit pas être activée pour un usage normal.** L’option désactivée conserve l’action native. Si elle est activée, un UUID v4 est obligatoire : le JavaScript déclaré ne fournit pas encore de jeton, donc l’écran natif sans intégration adaptée est bloqué. Une tentative acceptée reste `PROCESSING` jusqu’à l’implémentation de la finalisation ; aucun succès n’est déduit en fin de requête. Aucun trigger n’est ajouté.
 
 ## Installation
 
@@ -27,13 +27,13 @@ Pour une installation déjà activée en 0.1.0, désactiver puis réactiver le m
 | `TAKEPOSGUARD_DEBUG_LOG` | `0` | `0` ou `1` |
 | `TAKEPOSGUARD_MISSING_TOKEN_POLICY` | `reject` | Refus uniquement |
 
-Ces paramètres préparent les étapes suivantes. Les intégrations tierces devront fournir un jeton stable par tentative ; aucun contournement silencieux ne sera proposé.
+L’option commande maintenant l’interception serveur. Les intégrations tierces devront fournir un jeton stable par tentative ; aucun contournement silencieux ne sera proposé.
 
 Les écritures utilisent les API natives, une transaction et l'entité courante. Le formulaire accepte uniquement POST et conserve la vérification CSRF native. Une valeur invalide empêche l'enregistrement de tout le formulaire. La configuration est conservée lors de la désactivation/réactivation.
 
 ## Identifiants et droits
 
-Numéro local : `501117`. Droits : `50111701` (`audit/read`) et `50111702` (`maintenance/write`). Ils ne donnent aucun droit de paiement et ne conditionneront pas la protection serveur. La configuration reste réservée aux administrateurs.
+Numéro local : `501117`. Droits : `50111701` (`audit/read`) et `50111702` (`maintenance/write`). Ils ne donnent aucun droit de paiement et ne conditionnent pas la protection serveur. La configuration reste réservée aux administrateurs.
 
 Les identifiants ont été contrôlés dans les descripteurs locaux et en lecture seule dans `rights_def`. Cela ne constitue pas une réservation mondiale : vérifier les collisions sur chaque instance avant installation. Les pages d'audit et de maintenance viendront ultérieurement.
 
@@ -45,7 +45,7 @@ Pour le stockage, exécuter `php test/storage.php --mysql` depuis le dossier du 
 
 `php test/sql_portability.php` vérifie la conversion des scripts par le pilote PostgreSQL Dolibarr, sans connexion PostgreSQL. Ce contrôle ne remplace pas un test d'installation et d'exécution sur ce moteur.
 
-Résultats exécutés localement : 48 contrôles de schéma/stockage sur MariaDB via le pilote `mysqli`, 18 cas de configuration et contrôles du descripteur, conversion de neuf instructions SQL par le pilote PostgreSQL. L'activation réelle dans l'interface n'a pas été exécutée.
+Résultats exécutés localement : 56 contrôles de schéma/stockage sur MariaDB via le pilote `mysqli`, 18 cas de configuration et contrôles du descripteur, conversion de neuf instructions SQL par le pilote PostgreSQL. L'activation réelle dans l'interface n'a pas été exécutée.
 
 Les tests de concurrence du verrou sont décrits ci-dessous. Les tests de paiement et stock après interception appartiennent aux étapes suivantes. Cette version ne doit pas être utilisée comme protection en production.
 
@@ -61,7 +61,7 @@ L'activation charge les fichiers `sql/llx_takeposguard*.sql` et leurs clés via 
 
 `completeAttempt()` stocke un résultat confirmé par son appelant et ne remplace qu'un état `PROCESSING`. Le reste et le statut sont rechargés ; le montant réel provient du lien de paiement en base, jamais du montant demandé. Un paiement référencé doit appartenir à la même entité et à la facture concernée. Une tentative finalisée ne peut pas être réécrite avec cette méthode.
 
-La bibliothèque n'ouvre ni ne termine de transaction. Le code appelant devra vérifier les droits et détenir le verrou exclusif avant création/finalisation ; cette orchestration sera implémentée aux points suivants. Le statut `SUCCESS` n'est pas déduit automatiquement par la couche de stockage. Les modes et montants demandés sont des informations d'audit, sans pouvoir d'autoriser un paiement.
+La bibliothèque n'ouvre ni ne termine de transaction. Le code appelant devra vérifier les droits et détenir le verrou exclusif avant création/finalisation ; l’interception applique ces conditions avant la création ; la finalisation reste à implémenter. Le statut `SUCCESS` n'est pas déduit automatiquement par la couche de stockage. Les modes et montants demandés sont des informations d'audit, sans pouvoir d'autoriser un paiement.
 
 IP et user-agent sont facultatifs, validés et limités ; les messages d'erreur doivent être techniques et sans données sensibles. La bibliothèque n'écrit aucun log contenant les requêtes ou données de paiement. Les index couvrent la facture/date, l'état/date, la date de finalisation et l'expiration. Les références métier n'ont pas de suppression en cascade, pour préserver l'audit. Aucun nettoyage automatique ni limite de tentatives n'est activé à ce stade ; ces contrôles viendront avec l'interception et la maintenance.
 
@@ -86,7 +86,7 @@ Après le verrou consultatif, un `INSERT` atomique crée les métadonnées. Il e
 | `RECOVERY_REQUIRED` (`2`) | Verrou consultatif détenu, ancien jeton expiré à réconcilier ; aucun traitement natif avant récupération confirmée. |
 | `ERROR` (`-1`) | Erreur technique ou entrée non prise en charge : aucun traitement natif. |
 
-**Comparer explicitement le résultat à `ACQUIRED` : tester seulement sa valeur booléenne serait incorrect.** Les droits, l'idempotence et la décision de poursuivre TakePOS seront ajoutés au point suivant. Le gestionnaire ne permet pas à lui seul de rejouer un jeton finalisé.
+**Comparer explicitement le résultat à `ACQUIRED` : tester seulement sa valeur booléenne serait incorrect.** Le hook vérifie les droits, le jeton et l’historique avant de poursuivre TakePOS. Le gestionnaire ne permet pas à lui seul de rejouer un jeton finalisé.
 
 ### Expiration, libération et récupération
 
@@ -107,6 +107,22 @@ Les connexions MySQL persistantes (`p:`) sont refusées. Les pools PostgreSQL en
 `php test/locks.php --mysql` exécute 39 contrôles sur MariaDB, dont deux processus PHP concurrents avec jetons identiques puis différents, visibilité des métadonnées, commit/rollback natifs, expiration pendant activité, isolation d'entité, sortie sans libération, récupération conditionnelle et perte de propriété. Le test crée des tables partagées sous un préfixe aléatoire `tpg_locktest_<12 caractères hexadécimaux>_`, et les supprime à la fin. Il exige des droits CREATE/DROP sur ce namespace ; aucune table native ni donnée de paiement n'est modifiée. Si le processus principal du test est tué brutalement, vérifier puis supprimer uniquement les deux tables de ce préfixe précis.
 
 `php test/lock_dialects.php` exécute 11 contrôles de la branche PostgreSQL et des refus de moteurs avec un double DoliDB. Ce n'est pas un test sur un serveur PostgreSQL ; l'intégration et la concurrence sur PostgreSQL restent à exécuter avant d'annoncer cette variante comme certifiée.
+
+## Interception serveur (étape 4)
+
+`ActionsTakeposguard::doActions()` intervient uniquement dans le contexte `takeposinvoice`, pour `action=valid` et lorsque `TAKEPOSGUARD_ENABLE=1`. Les autres contextes/actions et l’option désactivée retournent `0` sans lecture métier ni acquisition de verrou. Le hook conserve les contrôles CSRF de `main.inc.php` ; le jeton d’idempotence ne remplace jamais le jeton CSRF natif.
+
+L’utilisateur doit être interne, authentifié et disposer de `takepos/run` et `facture/creer`, droits utilisés par le chemin natif. Les droits du module restent réservés à l’audit et à la maintenance ; ils ne permettent jamais de contourner la protection. La facture doit exister, appartenir exactement à l’entité courante et avoir `module_source=takepos`.
+
+Après validation stricte du UUID v4, le hook acquiert le verrou avant la transaction native. Seul `ACQUIRED` autorise la suite. Sous exclusion, il recherche le propriétaire du jeton dans l’entité, recharge l’objet facture et crée la tentative `PROCESSING` avec l’instantané natif du statut, du reste et des paiements. Les modes et montants reçus restent des données d’audit, sans autoriser le paiement. Le hook retourne alors `0` et conserve son verrou pendant toute l’action native, sans ouvrir ni terminer de transaction.
+
+Tout jeton déjà enregistré est refusé, y compris `FAILED` et `BLOCKED` : une nouvelle tentative volontaire exige un nouveau jeton. Un jeton lié à une autre facture dans l’entité est refusé sans divulguer cette facture. La contrainte unique reste la dernière protection contre deux insertions concurrentes d’un même jeton sur des factures différentes. Aucun paiement, mouvement bancaire ou mouvement de stock n’est créé par le module.
+
+Un refus retourne `1`, remplace l’action native, publie un message traduit et affiche un fragment HTML échappé dans la réponse AJAX. Les refus avant insertion ne créent pas de ligne d’historique, pour éviter une accumulation de tentatives invalides. Les logs détaillés contiennent uniquement des codes stables, jamais jeton, montant, utilisateur, SQL ou exception brute.
+
+**Limite volontaire de cette étape :** une tentative acceptée reste `PROCESSING` et ses métadonnées de verrou persistent à la fermeture de la session SQL. Une expiration retourne une demande de réconciliation et bloque le paiement ; elle ne supprime ni ne remplace automatiquement le propriétaire. Les étapes de finalisation et récupération permettront les paiements ultérieurs. Aucun nettoyage manuel des lignes `PROCESSING` ne doit servir à contourner cette restriction. Les paiements partiels avec lots, le JavaScript et le secours shutdown seront traités aux étapes prévues.
+
+`php test/interception.php` vérifie l’orchestration avec doubles : option désactivée, autres contextes/actions, droits, facture/entité/origine, jetons invalides et rejoués, refus d’un jeton d’une autre facture, verrou occupé/erreur/récupération, rechargement natif, erreurs de stockage et maintien du verrou avant retour au cœur. Les tests de stockage et de concurrence vérifient séparément les primitives SQL réelles. Ces contrôles ne constituent pas un test HTTP de paiement ni une preuve du nombre de mouvements bancaires/stock ; ceux-ci restent à exécuter après les étapes suivantes.
 
 ## Licence
 

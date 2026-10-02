@@ -11,12 +11,14 @@ if (PHP_SAPI !== 'cli' || !in_array('--mysql', $argv, true)) {
 }
 error_reporting(E_ALL);
 define('DOL_DOCUMENT_ROOT', realpath(__DIR__.'/../../..'));
+define('DOL_URL_ROOT', '/dolibarr');
 require DOL_DOCUMENT_ROOT.'/conf/conf.php';
 define('MAIN_DB_PREFIX', 'tpg_test_');
 require_once DOL_DOCUMENT_ROOT.'/core/lib/functions.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/commoninvoice.class.php';
 require_once __DIR__.'/../class/takeposguardstorage.class.php';
+require_once __DIR__.'/../class/actions_takeposguard.class.php';
 
 $conf = new stdClass();
 $conf->entity = 1;
@@ -57,6 +59,15 @@ class StorageFixtureInvoice extends CommonInvoice
 		$this->total_ttc = $row->total_ttc;
 		$this->module_source = $row->module_source;
 	}
+	public function fetch($id, $ref = '', $ref_ext = '', $ref_int = '')
+	{
+		$result = $this->db->query('SELECT * FROM '.MAIN_DB_PREFIX.'facture WHERE rowid = '.((int) $id));
+		if (!$result || !($row = $this->db->fetch_object($result))) {
+			return -1;
+		}
+		$this->__construct($this->db, $row);
+		return 1;
+	}
 }
 
 /** Only replace full Facture::fetch hydration, not snapshot SQL or calculation. */
@@ -67,6 +78,19 @@ class StorageFixtureRepository extends TakeposguardStorage
 		$result = $this->db->query('SELECT * FROM '.MAIN_DB_PREFIX.'facture WHERE rowid = '.((int) $invoiceId));
 		$row = $this->db->fetch_object($result);
 		return $row ? new StorageFixtureInvoice($this->db, $row) : false;
+	}
+}
+
+/** Native hook, lock and storage SQL, with minimal invoice hydration only. */
+class StorageFixtureHook extends ActionsTakeposguard
+{
+	protected function newStorage()
+	{
+		return new StorageFixtureRepository($this->db);
+	}
+	public function releaseFixtureLock()
+	{
+		return $this->paymentLock->release();
 	}
 }
 
@@ -108,6 +132,28 @@ try {
 	fixtureSql('CREATE TEMPORARY TABLE tpg_test_paiement_facture (fk_paiement integer, fk_facture integer, amount double(24,8), multicurrency_amount double(24,8)) ENGINE=innodb');
 	fixtureSql('CREATE TEMPORARY TABLE tpg_test_societe_remise_except (fk_facture_source integer, fk_facture integer, amount_ttc double(24,8), multicurrency_amount_ttc double(24,8)) ENGINE=innodb');
 	fixtureSql("INSERT INTO tpg_test_facture VALUES (1,1,'takepos',0,100,0),(2,1,'takepos',1,100,0),(3,2,'takepos',0,100,0),(4,1,'other',0,100,0),(5,1,'takepos',1,-100,2)");
+	$conf->global->TAKEPOSGUARD_ENABLE = 1;
+	$conf->global->TAKEPOSGUARD_LOCK_TIMEOUT = 120;
+	$user = new class {
+		public $id = 1;
+		public $socid = 0;
+		public function hasRight($module, $right) { return true; }
+	};
+	$_GET = array('takeposguard_token' => '12345678-1234-4234-8234-123456789afe', 'pay' => 'LIQ', 'amount' => '25');
+	$_SESSION['takeposterminal'] = 1;
+	$hook = new StorageFixtureHook($db);
+	$nativeFixture = new StorageFixtureInvoice($db, (object) array('rowid' => 2, 'entity' => 1, 'fk_statut' => 0, 'total_ttc' => 100, 'module_source' => 'takepos'));
+	$action = 'valid';
+	storageCheck($hook->doActions(array('context' => 'takeposinvoice'), $nativeFixture, $action, null) === 0
+		&& (int) $nativeFixture->status === 1, 'Hook accepts under real lock and refreshes stale status');
+	$hookStorage = new StorageFixtureRepository($db);
+	$hookAttempt = $hookStorage->fetchAttempt(2, $_GET['takeposguard_token']);
+	storageCheck($hookAttempt && $hookAttempt->status === 'PROCESSING' && (float) $hookAttempt->remain_before === 100.0
+		&& $hookStorage->fetchInvoiceLock(2) !== null && (int) $db->transaction_opened === 0,
+		'Hook persists authoritative snapshot and lock before native transaction');
+	// No native action executed in this fixture; explicit cleanup is test-only.
+	storageCheck($hook->releaseFixtureLock(), 'Integration fixture owns its lock');
+	$_GET = array();
 	$a = '12345678-1234-4234-8234-123456789abc';
 	$b = '12345678-1234-4234-8234-123456789abd';
 	$c = '12345678-1234-4234-8234-123456789abe';
@@ -161,6 +207,11 @@ try {
 	storageCheck($other->fetchAttempt(1, $a) === null && !$other->completeAttempt(1, $a, 'FAILED', array()), 'Cross-entity access denied');
 	storageCheck($other->createProcessing(3, $a, 1) > 0, 'Token reusable in another entity');
 	storageCheck($storage->fetchAttempt(1, $a)->status === 'SUCCESS', 'Original entity scope remains fixed');
+	storageCheck((int) $storage->fetchTokenOwner($a)->fk_invoice === 1
+		&& $storage->fetchTokenOwner($a)->status === 'SUCCESS', 'Token lookup finds invoice binding and terminal status');
+	storageCheck((int) $other->fetchTokenOwner($a)->fk_invoice === 3, 'Token lookup isolated by entity');
+	storageCheck($storage->fetchTokenOwner('12345678-1234-4234-8234-123456789aff') === null, 'Unused token distinct from SQL failure');
+	storageCheck($storage->fetchTokenOwner('invalid') === false, 'Token lookup validates UUID');
 	fixtureSql("INSERT INTO tpg_test_takeposguard_invoice_lock(entity,fk_invoice,operation_token,datec,expires_at) VALUES (1,1,'$a','2026-01-01 00:00:00','2026-01-01 00:02:00')");
 	storageCheck($db->query("INSERT INTO tpg_test_takeposguard_invoice_lock(entity,fk_invoice,operation_token,datec,expires_at) VALUES (1,1,'$b','2026-01-01 00:00:00','2026-01-01 00:02:00')", 1) === false, 'Unique lock per entity/invoice');
 	fixtureSql("INSERT INTO tpg_test_takeposguard_invoice_lock(entity,fk_invoice,operation_token,datec,expires_at) VALUES (2,1,'$a','2026-01-01 00:00:00','2026-01-01 00:02:00')");
@@ -175,6 +226,7 @@ try {
 	storageCheck($storage->createProcessing(2, '12345678-1234-4234-8234-123456789ac2', 1) === false
 		&& $storage->error === 'TakeposguardSnapshotFailed', 'Native calculation failure blocks persistence');
 	fixtureSql('DROP TEMPORARY TABLE tpg_test_takeposguard_payment_attempt');
+	storageCheck($storage->fetchTokenOwner($a) === false, 'Token SQL failure remains fail closed');
 	storageCheck($storage->fetchAttempt(1, $a) === false && $storage->error === 'TakeposguardStorageReadFailed', 'SQL read failure remains distinct from absence');
 	echo $checks." storage/schema checks passed on ".$db->type." (temporary tables only).\n";
 } catch (Throwable $error) {

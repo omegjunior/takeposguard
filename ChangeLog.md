@@ -1,5 +1,12 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.4.0
+
+- Interception `takeposinvoice/doActions` avant la transaction native : droits, entité, origine, UUID v4, exclusion et historique.
+- Rechargement de la facture et persistance `PROCESSING` avant poursuite du traitement natif.
+- Refus des jetons absents, rejoués ou liés à une autre facture, erreurs et récupération non réconciliée ; messages traduits et échappés.
+- Tests ciblés de l’orchestration ; finalisation, JavaScript et récupération restent aux étapes suivantes.
+
 ## 0.3.0
 
 - Verrous de session MySQL/MariaDB et PostgreSQL associés aux métadonnées persistantes.
