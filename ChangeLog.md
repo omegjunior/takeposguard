@@ -1,5 +1,13 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.10.0
+
+- Étape 10 : commande de recette locale unique, lint PHP/JavaScript et contrôles du contrat des sources natives.
+- Paiements réellement exécutés par le bloc TakePOS installé et les classes natives Facture/Paiement/Account/MouvementStock, dans des tables isolées.
+- Concurrence à deux processus, rejeux, paiements partiels, stocks physiques et lots, rollbacks sans écritures orphelines, interruptions avant/après commit et multientité.
+- Rapport de recette et procédure HTTP A–J ; qualification locale 22.0.5/mysqli distinguée des essais 22.0.4, navigateur, prestataires et PostgreSQL restant à réaliser.
+- Version 0.10.0 ; aucune modification du cœur, des droits, des schémas persistants ou de l'activation de la protection.
+
 ## 0.9.0
 
 - Étapes 8 et 9 regroupées : audit paginé avec filtres, jointures facture/utilisateur, jetons tronqués et droits distincts de maintenance.

@@ -2,9 +2,9 @@
 
 Module externe indépendant installé dans `htdocs/custom/takeposguard`, sans modification du cœur Dolibarr.
 
-## État de la version 0.9.0
+## État de la version 0.10.0
 
-Cette version implémente les points 1 à 9 : configuration, stockage, verrou exclusif, interception serveur, protection du stock lors des paiements partiels, protection JavaScript, finalisation, récupération, audit et maintenance. Les résultats confirmés en base deviennent `SUCCESS` ou `FAILED` après la transaction native ; une situation ambiguë devient `BLOCKED`. La protection reste à valider sur une instance de recette avant production : la recette HTTP complète reste à exécuter à l’étape 10. L’option désactivée conserve l’action native. Aucun trigger n’est ajouté.
+Cette version implémente les points 1 à 9 et ajoute la recette automatisée du point 10 : configuration, stockage, verrou exclusif, interception serveur, protection du stock lors des paiements partiels, protection JavaScript, finalisation, récupération, audit et maintenance. Les résultats confirmés en base deviennent `SUCCESS` ou `FAILED` après la transaction native ; une situation ambiguë devient `BLOCKED`. La protection reste à valider sur une instance de recette avant production : les tests natifs CLI de paiement/banque/stock et concurrence sont exécutés, mais la recette HTTP authentifiée reste à réaliser. Voir le [rapport de recette](docs/acceptance-report.md). L’option désactivée conserve l’action native. Aucun trigger n’est ajouté.
 
 ## Installation
 
@@ -13,7 +13,7 @@ Cette version implémente les points 1 à 9 : configuration, stockage, verrou ex
 3. Activer le module dans Configuration > Modules/Applications. La dépendance TakePOS est déclarée.
 4. Ouvrir sa configuration avec un compte administrateur.
 
-La version locale inspectée est 22.0.5. La compatibilité du traitement de paiement avec les versions ultérieures sera vérifiée aux étapes suivantes.
+La version locale inspectée est 22.0.5. Le contrôle des sources et la recette native locale passent sur cette version ; 22.0.4 et les autres versions ne sont pas certifiées par ces résultats. Relancer les contrôles et la recette HTTP sur chaque version déployée.
 
 Pour une installation déjà activée en 0.1.0, désactiver puis réactiver le module afin de charger les nouvelles tables. La configuration reste conservée. Les tables et l'historique ne sont pas supprimés lors de la désactivation.
 
@@ -216,7 +216,32 @@ Une tâche **CronJob Dolibarr native**, quotidienne et désactivée par défaut,
 
 `php test/audit.php` : 10 contrôles des droits distincts, des comptes externes/non authentifiés, de la navigation et de l’échappement. `php test/storage.php --mysql` : 166 contrôles, dont audit paginé, filtre invalide, récupération expirée, verrou actif malgré expiration, propriétaire modifié, résultat ambigu, nettoyage sélectif, conservation des clés et du stock, multientité, plafond de tentatives, lots de 500 et droits de la tâche planifiée. Les contrôles de configuration comprennent 22 cas et le statut désactivé de la tâche. Les tests de concurrence, de finalisation, de JavaScript, de stock natif avec doubles et de conversion SQL PostgreSQL restent exécutés.
 
-La recette HTTP authentifiée doit encore vérifier l’activation/réactivation des menus et de la tâche, les deux droits séparément, l’accès direct interdit, les POST avec CSRF invalide, la pagination, les références contenant du HTML, les confirmations et refus de maintenance, et l’exécution d’une tâche dans deux entités. Aucun navigateur authentifié ni serveur PostgreSQL n’a été utilisé pour cette étape. L’étape 10 reste la recette complète de paiement/banque/stock et la vérification de compatibilité ; le module reste à qualifier avant production.
+La recette HTTP authentifiée doit encore vérifier l’activation/réactivation des menus et de la tâche, les deux droits séparément, l’accès direct interdit, les POST avec CSRF invalide, la pagination, les références contenant du HTML, les confirmations et refus de maintenance, et l’exécution d’une tâche dans deux entités. Aucun navigateur authentifié ni serveur PostgreSQL n’a été utilisé pour cette étape. L’étape 10 ajoute désormais les paiements, écritures bancaires et mouvements de stock natifs en CLI, ainsi que le contrôle des sources. La qualification HTTP et prestataires reste nécessaire avant production.
+
+## Recette automatisée (étape 10)
+
+Depuis le dossier du module, avec PHP CLI et Node.js disponibles :
+
+```sh
+php test/run.php
+php test/run.php --mysql
+```
+
+La première commande vérifie la syntaxe PHP/JavaScript, les doubles de test et le contrat des sources du cœur installé. Elle annonce explicitement que les effets en base n'ont pas été testés. La seconde ajoute les tests de stockage, de verrouillage concurrent et les **effets natifs réels**. Un échec arrête la commande avec un code non nul. Elle ne débite aucun prestataire et n'appelle pas les pages HTTP de paiement.
+
+`--mysql` utilise la connexion Dolibarr de `conf/conf.php`, via DoliDB, et exige le pilote `mysqli` ainsi que les droits de création/suppression de tables. Utiliser une instance de recette : les fixtures créent leurs propres tables à préfixe aléatoire, puis les suppriment dans un `finally`. Elles ne changent ni les ventes ni les constantes persistantes. La fixture native refuse les références SQL à des tables applicatives hors de son préfixe et désactive la génération PDF. Une interruption brutale du processus principal peut laisser des tables `tpg_native_<12 caractères hexadécimaux>_*` ou `tpg_locktest_*` : vérifier le préfixe exact et l'absence de processus de test avant leur nettoyage, sans toucher aux tables métier.
+
+`test/native_acceptance.php` extrait sans réécriture le bloc `valid` du fichier `takepos/invoice.php` installé. Il l'exécute entre les hooks du module avec les classes natives de facture, paiement, banque et stock sur les schémas natifs isolés. Les workers utilisent deux connexions et une barrière : les deux factures sont chargées brouillon avant que le processus autorisé ne termine. Les quantités d'entrepôt et de lot sont vérifiées, en plus du nombre d'écritures. Les erreurs de banque/stock sont natives ; l'erreur de liaison paiement est injectée après l'insertion native pour contrôler son rollback. Les interruptions PHP avant et après commit reproduisent l'ordre du shutdown Dolibarr.
+
+Ce scénario ne remplace pas le dispatch HTTP, l'authentification, le CSRF de bout en bout, le rendu ni les modules tiers : le bootstrap fournit un utilisateur et une configuration de test. Les schémas métier utilisent leurs colonnes natives, sans installer toutes leurs clés étrangères. Le runner ne lance aucun encaissement sur les factures de l'instance.
+
+```sh
+php test/compatibility.php /chemin/vers/une/autre/version/htdocs
+```
+
+Ce contrôle en lecture seule vérifie les points d'accroche, leur ordre, les bornes du bloc de paiement, les branches stock, les fonctions JavaScript, les statuts de facture et les compteurs transactionnels. Il affiche l'empreinte du bloc natif pour tracer une mise à jour. Il échoue si son contrat change et impose alors une nouvelle inspection ; réussir ce contrôle structurel ne certifie pas une version.
+
+Le [rapport exécuté](docs/acceptance-report.md) indique les résultats et les limites. La [procédure HTTP A–J](docs/http-acceptance.md) complète la qualification sur une instance dédiée, avec deux sessions PHP distinctes pour tester une concurrence réelle. La mise à jour 0.9.0 → 0.10.0 ne change ni les tables, ni les menus, ni les droits ; copier les fichiers suffit. La protection reste désactivée par défaut sur une nouvelle installation.
 
 ## Licence
 
