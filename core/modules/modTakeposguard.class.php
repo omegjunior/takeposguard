@@ -30,7 +30,7 @@ class modTakeposguard extends DolibarrModules
 		// Checked against local descriptors and rights_def; not globally reserved.
 		$this->numero = 501117;
 		$this->rights_class = 'takeposguard';
-		$this->family = 'financial';
+		$this->family = 'Fred Omega Junior';
 		$this->module_position = '90';
 		$this->name = 'Takeposguard';
 		$this->description = 'ModuleTakeposguardDesc';
