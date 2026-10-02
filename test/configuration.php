@@ -31,4 +31,21 @@ foreach ($module->const as $constant) {
 		exit(1);
 	}
 }
+/** Installation must stop when Dolibarr returns 0 for an SQL load failure. */
+class ConfigurationFailedSchemaModule extends modTakeposguard
+{
+	protected function _load_tables($reldir, $onlywithsuffix = '')
+	{
+		return 0;
+	}
+	protected function _init($array_sql, $options = '')
+	{
+		throw new RuntimeException('Activation must not run after a schema failure');
+	}
+}
+$failedModule = new ConfigurationFailedSchemaModule(null);
+if ($failedModule->init() !== -1) {
+	fwrite(STDERR, 'Schema failure must prevent activation'.PHP_EOL);
+	exit(1);
+}
 echo count($cases).' validation cases and descriptor checks passed'.PHP_EOL;

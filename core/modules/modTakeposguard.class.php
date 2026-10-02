@@ -34,7 +34,7 @@ class modTakeposguard extends DolibarrModules
 		$this->module_position = '90';
 		$this->name = 'Takeposguard';
 		$this->description = 'ModuleTakeposguardDesc';
-		$this->version = '0.1.0';
+		$this->version = '0.2.0';
 		$this->editor_name = 'Fred Omega Junior';
 		$this->const_name = 'MAIN_MODULE_TAKEPOSGUARD';
 		$this->picto = 'shield-alt';
@@ -72,7 +72,9 @@ class modTakeposguard extends DolibarrModules
 	/** @return int Activation result */
 	public function init($options = '')
 	{
-		// No business tables yet: they are introduced in the next implementation step.
+		if ($this->_load_tables('/takeposguard/sql/') <= 0) {
+			return -1;
+		}
 		return $this->_init(array(), $options);
 	}
 
