@@ -5,9 +5,9 @@ TakeposguardAbout=About TakePOS Payment Guard
 TakeposguardAboutPage=Independent TakePOS payment protection module.
 TakeposguardReadAudit=Read payment attempt audit
 TakeposguardMaintain=Maintain payment locks and history
-TakeposguardConfigurationOnly=Intermediate release: server interception is active when enabled. JavaScript, finalization and recovery are not implemented yet. Missing tokens are rejected and accepted attempts remain PROCESSING. Keep disabled for normal use.
+TakeposguardConfigurationOnly=Intermediate release: JavaScript and server guards are available. Finalization and recovery are still pending; accepted attempts remain PROCESSING. Keep disabled for normal use.
 TakeposguardEnable=Enable payment protection
-TakeposguardEnableHelp=Disabled by default. Enabling this intermediate release requires an integration providing a UUID v4 token. Finalization is still pending.
+TakeposguardEnableHelp=Disabled by default. JavaScript now supplies the UUID v4 token, but server finalization is still pending.
 TakeposguardLockTimeout=Lock lifetime (seconds)
 TakeposguardLockTimeoutHelp=10 to 3600 seconds; default 120. Expiration must never override an active database lock.
 TakeposguardHistoryDays=Detailed history retention (days)
@@ -31,3 +31,9 @@ TakeposguardPaymentTokenUsed=This payment attempt token has already been used. C
 # Partial payments and stock
 TakeposguardPaymentInvoiceNotPayable=This invoice is settled, closed, abandoned or has no payable balance. No payment was started.
 TakeposguardPaymentStockUnproven=The module history cannot confirm the initial validation of this invoice. Payment was blocked to prevent another stock movement. Contact your administrator.
+
+# JavaScript payment guard
+TakeposguardJavascriptPending=Payment in progress. Please wait.
+TakeposguardJavascriptUncertain=The payment outcome must be checked. Do not start another charge; check the invoice or contact your administrator.
+TakeposguardJavascriptCryptoRequired=Secure payment token generation is unavailable in this browser. Payment was blocked.
+TakeposguardJavascriptRetry=Retry the same request without a new token

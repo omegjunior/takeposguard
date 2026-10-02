@@ -2,9 +2,9 @@
 
 Module externe indépendant installé dans `htdocs/custom/takeposguard`, sans modification du cœur Dolibarr.
 
-## État de la version 0.5.0
+## État de la version 0.6.0
 
-Cette version implémente les points 1 à 5 : configuration, stockage, verrou exclusif, interception serveur et protection du stock lors des paiements partiels. **Elle reste intermédiaire et ne doit pas être activée pour un usage normal.** L’option désactivée conserve l’action native. Si elle est activée, un UUID v4 est obligatoire : le JavaScript déclaré ne fournit pas encore de jeton, donc l’écran natif sans intégration adaptée est bloqué. Une tentative acceptée reste `PROCESSING` jusqu’à l’implémentation de la finalisation ; aucun succès n’est déduit en fin de requête. Aucun trigger n’est ajouté.
+Cette version implémente les points 1 à 6 : configuration, stockage, verrou exclusif, interception serveur, protection du stock lors des paiements partiels et protection JavaScript. **Elle reste intermédiaire et ne doit pas être activée pour un usage normal.** L’option désactivée conserve l’action native. Si elle est activée, le JavaScript fournit un UUID v4 stable par tentative aux requêtes natives. Un résultat incertain garde le jeton et bloque une nouvelle tentative indépendante. Une tentative acceptée reste `PROCESSING` jusqu’à l’implémentation de la finalisation ; aucun succès n’est déduit en fin de requête. Aucun trigger n’est ajouté.
 
 ## Installation
 
@@ -120,7 +120,7 @@ Tout jeton déjà enregistré est refusé, y compris `FAILED` et `BLOCKED` : une
 
 Un refus retourne `1`, remplace l’action native, publie un message traduit et affiche un fragment HTML échappé dans la réponse AJAX. Les refus avant insertion ne créent pas de ligne d’historique, pour éviter une accumulation de tentatives invalides. Les logs détaillés contiennent uniquement des codes stables, jamais jeton, montant, utilisateur, SQL ou exception brute.
 
-**Limite volontaire de cette étape :** une tentative acceptée reste `PROCESSING` et ses métadonnées de verrou persistent à la fermeture de la session SQL. Une expiration retourne une demande de réconciliation et bloque le paiement ; elle ne supprime ni ne remplace automatiquement le propriétaire. Les étapes de finalisation et récupération permettront les paiements ultérieurs. Aucun nettoyage manuel des lignes `PROCESSING` ne doit servir à contourner cette restriction. La politique des paiements partiels avec lots est décrite ci-dessous ; le JavaScript et le secours de finalisation shutdown restent aux étapes prévues.
+**Limite volontaire de cette étape :** une tentative acceptée reste `PROCESSING` et ses métadonnées de verrou persistent à la fermeture de la session SQL. Une expiration retourne une demande de réconciliation et bloque le paiement ; elle ne supprime ni ne remplace automatiquement le propriétaire. Les étapes de finalisation et récupération permettront les paiements ultérieurs. Aucun nettoyage manuel des lignes `PROCESSING` ne doit servir à contourner cette restriction. La politique des paiements partiels avec lots est décrite ci-dessous ; le secours de finalisation shutdown reste à l’étape prévue.
 
 `php test/interception.php` vérifie l’orchestration avec doubles : option désactivée, autres contextes/actions, droits, facture/entité/origine, jetons invalides et rejoués, refus d’un jeton d’une autre facture, verrou occupé/erreur/récupération, rechargement natif, erreurs de stockage et maintien du verrou avant retour au cœur. Les tests de stockage et de concurrence vérifient séparément les primitives SQL réelles. Ces contrôles ne constituent pas un test HTTP de paiement ni une preuve du nombre de mouvements bancaires/stock ; ceux-ci restent à exécuter après les étapes suivantes.
 
@@ -140,7 +140,35 @@ Cette étape prépare le paiement partiel volontaire mais la version reste inter
 
 Tests exécutés : `php test/interception.php` (51 contrôles), `php test/storage.php --mysql` (64 contrôles), `php test/partial_stock.php` (8 contrôles). Le test MariaDB utilise le hook, le verrou, l’historique et le calcul natif du solde sur tables temporaires. Le dernier test extrait le bloc de stock de `takepos/invoice.php` installé et l’exécute avec des doubles des classes d’écriture : deux appels initiaux, quantités des lignes conservées, zéro appel pour le paiement partiel protégé, restauration après sortie PHP. Il échoue si les bornes du bloc natif changent et exige alors une nouvelle inspection du cœur. Il ne crée aucun mouvement réel et ne vérifie pas les effets internes de `MouvementStock::livraison()`.
 
-Les tests HTTP complets de paiement, banque, stock avec/sans lots et rollback restent à exécuter après JavaScript/finalisation sur une instance de recette. Le cœur local est 22.0.5 ; les constantes, la boucle native et l’ordre des hooks doivent être revérifiés lors d’une montée de version.
+Les tests HTTP complets de paiement, banque, stock avec/sans lots et rollback restent à exécuter après finalisation sur une instance de recette. Le cœur local est 22.0.5 ; les constantes, la boucle native et l’ordre des hooks doivent être revérifiés lors d’une montée de version.
+
+## Protection JavaScript (étape 6)
+
+Le descripteur conserve son fichier déclaré `js/takeposguard.js.php`, chargé par `top_htmlhead()` sur les pages TakePOS. Ce point d’entrée authentifié lit la configuration et les traductions de l’entité courante, sans renouveler le jeton CSRF. Sa réponse est privée et non mise en cache. Si le module/l’option est désactivé ou si le droit TakePOS manque, il ne livre aucun code de protection. Le fichier JavaScript statique associé reste inerte sans cette configuration et ne s’installe que sur `takepos/index.php` et `takepos/pay.php`.
+
+Le script enveloppe les fonctions natives `Validate`, `DirectPayment`, `ValidateStripeTerminal` et `ValidateSumup`, en conservant leurs arguments, leur contexte et leur retour. Le premier appel crée la tentative puis désactive les commandes de paiement ; les appels suivants sont ignorés. La page et sa fenêtre de paiement partagent le même état dans la page parente. Les boutons ajoutés dynamiquement, notamment le terminal Stripe, sont également désactivés. Un message traduit et accessible indique le traitement.
+
+Le préfiltre est installé une seule fois par instance jQuery, y compris le jQuery parent utilisé par `parent.$('#poslines').load(...)`. Il ne modifie que les requêtes de même origine vers le chemin exact `takepos/invoice.php` avec `action=valid`, transmis dans l’URL ou les données GET/POST. Les requêtes de produits, de lignes, de banque ou de prestataire ne reçoivent aucun jeton du module. La seule observation supplémentaire porte sur la réponse native `smpcb.php?status` pour afficher un état à vérifier quand SumUp rapporte un échec.
+
+Un UUID v4 provient de `crypto.randomUUID()` ou de `crypto.getRandomValues()` avec les bits de version/variante requis. Aucun repli `Math.random()` n’est utilisé. Sans génération cryptographique, le clic est refusé. Un UUID valide fourni par une intégration est conservé ; les doublons du paramètre sont éliminés et le jeton CSRF natif reste intact. La facture provisoire peut être identifiée par sa place avant que PHP fournisse son identifiant ; cette résolution conserve le même jeton.
+
+Le navigateur conserve uniquement le jeton, l’identité facture/place et le type de prestataire dans `sessionStorage`, sous une clé liée au chemin d’installation, à l’entité et au terminal. Cela préserve l’incertitude après rechargement dans le même onglet. Si le stockage navigateur est indisponible, la coordination en mémoire continue mais ne survit pas au rechargement ; le serveur reste la protection indispensable contre le rejeu et la concurrence. Les onglets distincts ne partagent pas ce verrou JavaScript.
+
+Un statut HTTP 200, l’absence d’un message d’erreur ou l’expiration d’un délai ne prouvent pas le commit. Le contrat prévu pour l’étape 7 est une réponse portant `X-Takeposguard-Status: SUCCESS|FAILED` et `X-Takeposguard-Token` égal au jeton envoyé, après constat serveur du résultat. `SUCCESS` autorisera une nouvelle tentative avec un nouveau jeton ; `FAILED` fera de même uniquement pour un paiement ordinaire. Un délai de 600 ms après ce résultat bloque le deuxième clic d’une réponse très rapide. La capture des clics multiples protège aussi les commandes sous forme de liens.
+
+En cas de réponse non confirmée ou de panne réseau, le jeton reste conservé. Pour un paiement ordinaire et tant que la requête reste disponible en mémoire, une commande explicite permet de retenter exactement ses paramètres avec le même jeton. Aucun rejeu automatique n’est effectué. Après un rechargement complet, la requête n’est pas persistée : il faudra la récupération serveur de l’étape 7 pour résoudre cette incertitude. **La version actuelle n’émet pas encore les en-têtes de finalisation et reste donc à garder désactivée pour un usage normal.**
+
+### Stripe et SumUp
+
+L’enveloppe empêche les doubles appels avant le lancement du prestataire et ajoute le jeton à leur requête finale vers TakePOS. Un échec confirmé de collecte Stripe, avant le traitement du paiement et avant tout appel de facture, permet une nouvelle tentative. Le callback natif SumUp utilise un statut partagé dans la session PHP, sans rattachement au UUID ou à la facture : même `FAILED` conserve donc un état à vérifier et n’autorise pas automatiquement un nouveau débit. Une erreur de traitement/capture Stripe, une interruption ou un échec natif après un débit prestataire garde l’état incertain : aucun nouveau débit prestataire ni rejeu de son lancement n’est autorisé automatiquement. Le délai visuel ne libère jamais cette protection.
+
+Le module ne transmet pas de clé d’idempotence aux API Stripe/SumUp et ne garantit pas l’unicité du débit externe, notamment entre onglets, appareils ou après perte du stockage navigateur. Ces garanties exigent une intégration côté prestataire. Vérifier le paiement chez le prestataire avant toute réconciliation manuelle ; ne pas effacer un jeton incertain pour relancer un débit.
+
+### Vérification
+
+`node --check js/takeposguard.js` et `node test/javascript.cjs` : 37 contrôles avec doubles DOM/jQuery, sans dépendance supplémentaire. Ils couvrent les doubles appels, le paiement direct, le jQuery parent, les GET/POST, les URL exclues, le CSRF, le UUID cryptographique de repli, les jetons fournis, la facture provisoire, les réponses incertaines, le rejeu contrôlé, le rechargement, les résultats corrélés et les prestataires. Les en-têtes de l’étape 7 sont simulés dans ces tests.
+
+Les contrôles PHP, stockage et concurrence restent exécutés séparément. Aucun navigateur authentifié, terminal Stripe réel, application SumUp ou paiement HTTP réel n’a été testé à cette étape. La recette visuelle devra vérifier les boutons natifs et dynamiques, le clavier, le modal après paiement partiel, une coupure réseau et le rétablissement après finalisation. Les intégrations qui remplacent les fonctions natives ou utilisent `fetch`/XHR sans jQuery doivent ajouter leur propre jeton stable ; la vérification serveur refuse tout jeton absent.
 
 ## Licence
 

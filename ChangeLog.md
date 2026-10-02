@@ -1,5 +1,13 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.6.0
+
+- Protection JavaScript des fonctions de paiement natives, directes, Stripe Terminal et SumUp ; état partagé avec la fenêtre parente.
+- UUID v4 cryptographique, préfiltre jQuery limité à l’action native valid et conservation du CSRF.
+- Désactivation immédiate des boutons, état visuel traduit, persistance du jeton incertain dans l’onglet et rejeu contrôlé avec le même jeton.
+- Aucune nouvelle tentative après une réponse incertaine ou un débit prestataire non réconcilié ; contrat de résultat confirmé préparé pour l’étape 7.
+- Tests JavaScript isolés, sans dépendance ni débit externe ; finalisation et récupération serveur restent à implémenter.
+
 ## 0.5.0
 
 - Vérification serveur du solde et du statut avant un nouveau paiement partiel, avec prise en charge du signe des avoirs.

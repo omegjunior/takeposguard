@@ -5,9 +5,9 @@ TakeposguardAbout=À propos de TakePOS Payment Guard
 TakeposguardAboutPage=Module indépendant de protection des paiements TakePOS.
 TakeposguardReadAudit=Consulter l'audit des tentatives de paiement
 TakeposguardMaintain=Administrer les verrous et l'historique
-TakeposguardConfigurationOnly=Version intermédiaire : interception serveur active si l’option est activée. JavaScript, finalisation et récupération restent à implémenter. Les jetons absents sont refusés et les tentatives acceptées restent PROCESSING. Garder désactivé pour un usage normal.
+TakeposguardConfigurationOnly=Version intermédiaire : protection JavaScript et serveur disponibles. La finalisation et la récupération restent à implémenter ; les tentatives acceptées restent PROCESSING. Garder désactivé pour un usage normal.
 TakeposguardEnable=Activer la protection des paiements
-TakeposguardEnableHelp=Désactivé par défaut. Cette version intermédiaire exige une intégration fournissant un jeton UUID v4. La finalisation reste à implémenter.
+TakeposguardEnableHelp=Désactivé par défaut. Le JavaScript fournit désormais le jeton UUID v4, mais la finalisation serveur reste à implémenter.
 TakeposguardLockTimeout=Durée du verrou (secondes)
 TakeposguardLockTimeoutHelp=De 10 à 3600 secondes ; 120 par défaut. L'expiration ne doit jamais contourner un verrou de base encore actif.
 TakeposguardHistoryDays=Conservation de l'historique détaillé (jours)
@@ -31,3 +31,9 @@ TakeposguardPaymentTokenUsed=Ce jeton de tentative a déjà été utilisé. Vér
 # Partial payments and stock
 TakeposguardPaymentInvoiceNotPayable=Cette facture est soldée, clôturée, abandonnée ou ne présente pas de solde payable. Aucun paiement n’a été lancé.
 TakeposguardPaymentStockUnproven=La validation initiale de cette facture ne peut pas être confirmée par l’historique du module. Le paiement est bloqué pour éviter un nouveau déstockage. Contactez votre administrateur.
+
+# JavaScript payment guard
+TakeposguardJavascriptPending=Paiement en cours. Veuillez patienter.
+TakeposguardJavascriptUncertain=Le résultat du paiement doit être vérifié. Ne lancez pas un nouveau débit ; consultez la facture ou contactez votre administrateur.
+TakeposguardJavascriptCryptoRequired=La génération sécurisée du jeton de paiement est indisponible dans ce navigateur. Le paiement a été bloqué.
+TakeposguardJavascriptRetry=Retenter la même requête, sans nouveau jeton
