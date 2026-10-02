@@ -20,7 +20,7 @@ Pour une installation déjà activée en 0.1.0, désactiver puis réactiver le m
 ## Configuration par entité
 
 | Constante | Défaut | Valeurs |
-|---|---|---|
+| --- | --- | --- |
 | `TAKEPOSGUARD_ENABLE` | `0` | `0` ou `1` |
 | `TAKEPOSGUARD_LOCK_TIMEOUT` | `120` | 10 à 3600 secondes |
 | `TAKEPOSGUARD_HISTORY_DAYS` | `90` | 1 à 3650 jours |
@@ -80,7 +80,7 @@ L'approche initiale par verrou de ligne sur une connexion séparée a été adap
 Après le verrou consultatif, un `INSERT` atomique crée les métadonnées. Il est autocommitté et visible avant tout traitement natif. En cas de doublon, le gestionnaire contrôle la ligne existante sous exclusion. L'expiration et les dates utilisent l'horloge de la base, pas celle du serveur PHP.
 
 | Résultat | Signification |
-|---|---|
+| --- | --- |
 | `ACQUIRED` (`1`) | Verrou détenu et métadonnées préparées pour le jeton demandé. |
 | `BUSY` (`0`) | Session concurrente ou métadonnées non expirées : aucun traitement natif. |
 | `RECOVERY_REQUIRED` (`2`) | Verrou consultatif détenu, ancien jeton expiré à réconcilier ; aucun traitement natif avant récupération confirmée. |
