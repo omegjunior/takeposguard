@@ -2,9 +2,9 @@
 
 Module externe indépendant installé dans `htdocs/custom/takeposguard`, sans modification du cœur Dolibarr.
 
-## État de la version 0.2.0
+## État de la version 0.3.0
 
-Cette version implémente les points 1 et 2 : configuration, droits, tables et bibliothèque de stockage. **Elle ne protège pas encore les paiements**, même si l'option est activée. Les hooks et le JavaScript déclarés sont sans traitement jusqu'aux étapes suivantes. Aucun trigger n'est ajouté.
+Cette version implémente les points 1 à 3 : configuration, droits, stockage et gestionnaire de verrou exclusif. **Elle ne protège pas encore les paiements**, même si l'option est activée. Le gestionnaire n'est pas encore appelé par les hooks TakePOS. Le JavaScript déclaré reste sans traitement jusqu'aux étapes suivantes. Aucun trigger n'est ajouté.
 
 ## Installation
 
@@ -47,7 +47,7 @@ Pour le stockage, exécuter `php test/storage.php --mysql` depuis le dossier du 
 
 Résultats exécutés localement : 48 contrôles de schéma/stockage sur MariaDB via le pilote `mysqli`, 18 cas de configuration et contrôles du descripteur, conversion de neuf instructions SQL par le pilote PostgreSQL. L'activation réelle dans l'interface n'a pas été exécutée.
 
-Les tests de concurrence, paiement et stock appartiennent aux étapes suivantes. Cette version ne doit pas être utilisée comme protection en production.
+Les tests de concurrence du verrou sont décrits ci-dessous. Les tests de paiement et stock après interception appartiennent aux étapes suivantes. Cette version ne doit pas être utilisée comme protection en production.
 
 ## Stockage des tentatives et verrous
 
@@ -55,7 +55,7 @@ L'activation charge les fichiers `sql/llx_takeposguard*.sql` et leurs clés via 
 
 - `takeposguard_payment_attempt` conserve le jeton UUID v4 canonique, la facture, l'entité, l'utilisateur, le terminal, les données demandées, les instantanés avant/après, les références de paiement, les dates et les erreurs bornées. Les états admis par la bibliothèque sont `PROCESSING`, `SUCCESS`, `FAILED`, `BLOCKED`.
 - Une clé unique couvre `(entity, fk_invoice, operation_token)`. Une seconde couvre `(entity, operation_token)` : le même jeton ne peut pas être affecté à une autre facture dans la même entité. Il peut être réutilisé dans une autre entité.
-- `takeposguard_invoice_lock` conserve le propriétaire logique et l'expiration, avec unicité `(entity, fk_invoice)`. La bibliothèque permet uniquement de lire ces métadonnées. Elle n'acquiert, ne supprime et ne récupère aucun verrou à cette étape.
+- `takeposguard_invoice_lock` conserve le propriétaire logique et l'expiration, avec unicité `(entity, fk_invoice)`. `TakeposguardStorage` permet de lire ces métadonnées ; `TakeposguardLock` assure l'exclusion décrite ci-dessous.
 
 `TakeposguardStorage` utilise la connexion DoliDB fournie et fixe son périmètre à l'entité courante lors de sa construction. `createProcessing()` recharge une facture TakePOS de cette entité et capture le reste à payer par les API natives. Le nombre et la dernière référence des paiements sont également mémorisés. `fetchAttempt()` distingue absence (`null`) et erreur (`false`, code technique dans `error`).
 
@@ -64,6 +64,49 @@ L'activation charge les fichiers `sql/llx_takeposguard*.sql` et leurs clés via 
 La bibliothèque n'ouvre ni ne termine de transaction. Le code appelant devra vérifier les droits et détenir le verrou exclusif avant création/finalisation ; cette orchestration sera implémentée aux points suivants. Le statut `SUCCESS` n'est pas déduit automatiquement par la couche de stockage. Les modes et montants demandés sont des informations d'audit, sans pouvoir d'autoriser un paiement.
 
 IP et user-agent sont facultatifs, validés et limités ; les messages d'erreur doivent être techniques et sans données sensibles. La bibliothèque n'écrit aucun log contenant les requêtes ou données de paiement. Les index couvrent la facture/date, l'état/date, la date de finalisation et l'expiration. Les références métier n'ont pas de suppression en cascade, pour préserver l'audit. Aucun nettoyage automatique ni limite de tentatives n'est activé à ce stade ; ces contrôles viendront avec l'interception et la maintenance.
+
+## Verrou exclusif par facture
+
+`TakeposguardLock` combine un verrou consultatif de session et la ligne persistante. La clé inclut la base, le préfixe, l'entité et la facture. MySQL/MariaDB utilise `GET_LOCK(..., 0)` ; PostgreSQL utilise `pg_try_advisory_lock(int, int)`. Les opérations passent uniquement par DoliDB. Aucun `begin`, `commit` ou `rollback` n'est ajouté par le gestionnaire.
+
+Les verrous de session ne sont pas libérés par un commit/rollback natif, mais par une libération explicite ou la fin de la session de base. Voir les documentations [MySQL](https://dev.mysql.com/doc/refman/8.0/en/locking-functions.html) et [PostgreSQL](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS). Une seule facture peut être gardée par session native, afin d'éviter les acquisitions récursives et les différences des anciennes versions MySQL.
+
+L'approche initiale par verrou de ligne sur une connexion séparée a été adaptée : le pilote PostgreSQL Dolibarr utilise `pg_connect()` sans garantir une nouvelle connexion physique. Les verrous consultatifs permettent d'utiliser la connexion native sans interférer avec ses transactions. La table est maintenue pour la visibilité et la récupération après interruption ; elle n'est jamais considérée seule comme une preuve d'exclusion.
+
+### Acquisition et résultats
+
+`acquire(int $invoiceId, string $token, int $ttl)` valide une facture TakePOS de l'entité courante, un UUID v4 et une durée de 10 à 3600 secondes. L'acquisition doit précéder la transaction native : elle est refusée si une transaction est déjà ouverte. L'entité et le préfixe sont fixés à la construction de l'objet.
+
+Après le verrou consultatif, un `INSERT` atomique crée les métadonnées. Il est autocommitté et visible avant tout traitement natif. En cas de doublon, le gestionnaire contrôle la ligne existante sous exclusion. L'expiration et les dates utilisent l'horloge de la base, pas celle du serveur PHP.
+
+| Résultat | Signification |
+|---|---|
+| `ACQUIRED` (`1`) | Verrou détenu et métadonnées préparées pour le jeton demandé. |
+| `BUSY` (`0`) | Session concurrente ou métadonnées non expirées : aucun traitement natif. |
+| `RECOVERY_REQUIRED` (`2`) | Verrou consultatif détenu, ancien jeton expiré à réconcilier ; aucun traitement natif avant récupération confirmée. |
+| `ERROR` (`-1`) | Erreur technique ou entrée non prise en charge : aucun traitement natif. |
+
+**Comparer explicitement le résultat à `ACQUIRED` : tester seulement sa valeur booléenne serait incorrect.** Les droits, l'idempotence et la décision de poursuivre TakePOS seront ajoutés au point suivant. Le gestionnaire ne permet pas à lui seul de rejouer un jeton finalisé.
+
+### Expiration, libération et récupération
+
+Un traitement encore actif garde son verrou consultatif même lorsque l'expiration est dépassée. Une seconde session ne peut pas le déloger. La durée configurée est donc un délai minimal avant récupération d'une session interrompue, et non une autorisation d'interrompre un paiement actif.
+
+Après une interruption, la fermeture de la connexion libère le verrou consultatif ; les métadonnées persistent. Tant qu'elles ne sont pas expirées, les nouvelles tentatives restent bloquées. Après expiration, `RECOVERY_REQUIRED` expose le jeton précédent via `previousToken`. L'appelant devra réconcilier la tentative et les effets natifs sous le verrou avant `confirmRecovery($expectedToken)`. Cette méthode remplace uniquement le propriétaire attendu encore expiré. La réconciliation automatique et le secours `register_shutdown_function()` ne sont pas implémentés à cette étape.
+
+`release()` supprime uniquement la ligne du jeton détenu puis libère le verrou consultatif. `abandon()` garde les métadonnées et libère seulement le verrou consultatif pour une réconciliation ultérieure. Ces deux méthodes refusent de libérer une session dont la transaction native est encore ouverte. Aucun destructeur ne libère automatiquement le verrou pendant un traitement. Si la transaction reste ouverte en fin de requête, conserver le verrou jusqu'à la fermeture de connexion évite d'autoriser une seconde requête avant son rollback.
+
+### Moteurs et limites
+
+Les variantes `mysqli` (MySQL/MariaDB) et `pgsql` sont explicites. Les autres moteurs refusent l'acquisition ; il n'existe aucun repli silencieux sur une simple ligne expirée. Un éventuel support supplémentaire devra apporter une garantie d'exclusion équivalente et des tests de concurrence.
+
+Les connexions MySQL persistantes (`p:`) sont refusées. Les pools PostgreSQL en mode transaction/statement et toute réaffectation de session pendant la requête sont incompatibles : utiliser une session physique stable pendant toute la requête. Aucun autre module ne doit libérer les verrous consultatifs du module. Les architectures MySQL multi-primaires où les requêtes d'une même instance arrivent sur des serveurs différents ne sont pas couvertes par un verrou consultatif local au serveur.
+
+### Tests exécutés
+
+`php test/locks.php --mysql` exécute 39 contrôles sur MariaDB, dont deux processus PHP concurrents avec jetons identiques puis différents, visibilité des métadonnées, commit/rollback natifs, expiration pendant activité, isolation d'entité, sortie sans libération, récupération conditionnelle et perte de propriété. Le test crée des tables partagées sous un préfixe aléatoire `tpg_locktest_<12 caractères hexadécimaux>_`, et les supprime à la fin. Il exige des droits CREATE/DROP sur ce namespace ; aucune table native ni donnée de paiement n'est modifiée. Si le processus principal du test est tué brutalement, vérifier puis supprimer uniquement les deux tables de ce préfixe précis.
+
+`php test/lock_dialects.php` exécute 11 contrôles de la branche PostgreSQL et des refus de moteurs avec un double DoliDB. Ce n'est pas un test sur un serveur PostgreSQL ; l'intégration et la concurrence sur PostgreSQL restent à exécuter avant d'annoncer cette variante comme certifiée.
 
 ## Licence
 

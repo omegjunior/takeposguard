@@ -1,5 +1,12 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.3.0
+
+- Verrous de session MySQL/MariaDB et PostgreSQL associés aux métadonnées persistantes.
+- Acquisition non bloquante, expiration évaluée avec l'horloge de la base et récupération explicitement conditionnée à la réconciliation.
+- Refus d'acquisition/libération dans une transaction native ; aucune transaction ajoutée.
+- Tests de concurrence avec deux processus PHP, expiration pendant activité et sortie sans libération.
+
 ## 0.2.0
 
 - Tables persistantes des tentatives et métadonnées de verrou, clés uniques et index multientité.
