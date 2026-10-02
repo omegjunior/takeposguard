@@ -34,7 +34,7 @@ class modTakeposguard extends DolibarrModules
 		$this->module_position = '90';
 		$this->name = 'Takeposguard';
 		$this->description = 'ModuleTakeposguardDesc';
-		$this->version = '0.6.0';
+		$this->version = '0.7.0';
 		$this->editor_name = 'Fred Omega Junior';
 		$this->const_name = 'MAIN_MODULE_TAKEPOSGUARD';
 		$this->picto = 'fa-shield-alt';

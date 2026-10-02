@@ -91,7 +91,7 @@ class StorageFixtureHook extends ActionsTakeposguard
 	}
 	public function releaseFixtureLock()
 	{
-		return $this->paymentLock->release();
+		return !$this->paymentLock->isHeld() || $this->paymentLock->release();
 	}
 }
 
@@ -220,6 +220,101 @@ try {
 	fixtureSql('INSERT INTO tpg_test_societe_remise_except VALUES (5,2,20,20)');
 	storageCheck($storage->createProcessing(2, '12345678-1234-4234-8234-123456789ac1', 1) > 0
 		&& (float) $storage->fetchAttempt(2, '12345678-1234-4234-8234-123456789ac1')->remain_before === 80.0, 'Native credit-note deduction included');
+	// Post-native finalization, rollback and crash recovery on isolated InnoDB fixtures.
+	$finalizer = new TakeposguardFinalizer($db, $storage);
+	$recovery = new TakeposguardRecovery($db, $storage);
+	foreach (array('draft-success', 'partial-success', 'rollback', 'interrupted-commit', 'interrupted-rollback', 'ambiguous') as $offset => $scenario) {
+		$id = 20 + $offset;
+		$token = sprintf('12345678-1234-4234-8234-%012x', $id);
+		$nextToken = sprintf('12345678-1234-4234-8234-%012x', $id + 100);
+		$status = $scenario === 'partial-success' ? 1 : 0;
+		fixtureSql("INSERT INTO tpg_test_facture VALUES ($id,1,'takepos',$status,100,0)");
+		$lock = new TakeposguardLock($db);
+		storageCheck($lock->acquire($id, $token, 120) === TakeposguardLock::ACQUIRED
+			&& $storage->createProcessing($id, $token, 1) > 0, 'Finalization baseline '.$scenario);
+		$db->begin();
+		fixtureSql('UPDATE tpg_test_facture SET fk_statut=1 WHERE rowid='.$id);
+		fixtureSql('INSERT INTO tpg_test_paiement VALUES ('.($id + 1000).',1)');
+		fixtureSql('INSERT INTO tpg_test_paiement_facture VALUES ('.($id + 1000).','.$id.',40,40)');
+		storageCheck($finalizer->reconcile($id, $token, $lock) === false
+			&& $storage->fetchAttempt($id, $token)->status === 'PROCESSING', 'Never finalize an uncommitted native transaction '.$scenario);
+		if (in_array($scenario, array('rollback', 'interrupted-rollback'), true)) {
+			$db->rollback();
+		} else {
+			$db->commit();
+		}
+		if ($scenario === 'ambiguous') {
+			fixtureSql('INSERT INTO tpg_test_paiement VALUES ('.($id + 2000).',1)');
+			fixtureSql('INSERT INTO tpg_test_paiement_facture VALUES ('.($id + 2000).','.$id.',10,10)');
+		}
+		if (strpos($scenario, 'interrupted-') === 0 || $scenario === 'ambiguous') {
+			storageCheck($lock->abandon(), 'Interrupted request keeps metadata '.$scenario);
+			$lock = new TakeposguardLock($db);
+			storageCheck($lock->acquire($id, $nextToken, 120) === TakeposguardLock::BUSY, 'TTL alone cannot be bypassed '.$scenario);
+			fixtureSql('UPDATE tpg_test_takeposguard_invoice_lock SET expires_at=\'2020-01-01 00:00:00\' WHERE fk_invoice='.$id.' AND entity=1');
+			storageCheck($lock->acquire($id, $nextToken, 120) === TakeposguardLock::RECOVERY_REQUIRED, 'Expired metadata requires reconciliation '.$scenario);
+			storageCheck($recovery->recover($lock, $id) === ($scenario !== 'ambiguous'), 'Recovery decision '.$scenario);
+			if ($scenario === 'ambiguous') {
+				storageCheck($storage->fetchAttempt($id, $token)->status === 'BLOCKED'
+					&& $storage->fetchInvoiceLock($id)->operation_token === $token, 'Ambiguous effects never authorize a new owner');
+				$lock->abandon();
+				continue;
+			}
+			storageCheck($storage->fetchInvoiceLock($id)->operation_token === $nextToken, 'Only reconciled owner replaced '.$scenario);
+		} else {
+			storageCheck($finalizer->reconcile($id, $token, $lock) === ($scenario === 'rollback' ? 'FAILED' : 'SUCCESS'), 'Committed-effect outcome '.$scenario);
+		}
+		$row = $storage->fetchAttempt($id, $token);
+		$failed = in_array($scenario, array('rollback', 'interrupted-rollback'), true);
+		storageCheck($row->status === ($failed ? 'FAILED' : 'SUCCESS') && (float) $row->remain_after === ($failed ? 100.0 : 60.0)
+			&& $row->date_completed !== null, 'Durable outcome and native balance '.$scenario);
+		storageCheck($failed ? $row->fk_payment === null : (int) $row->fk_payment === $id + 1000, 'Payment attribution '.$scenario);
+		storageCheck($lock->release() && $storage->fetchInvoiceLock($id) === null, 'Release after persistence '.$scenario);
+	}
+	$conf->global->TAKEPOSGUARD_DEBUG_LOG = 0;
+	$_GET = array('takeposguard_token' => '12345678-1234-4234-8234-123456789af2', 'pay' => 'LIQ', 'amount' => 40);
+	fixtureSql("INSERT INTO tpg_test_facture VALUES (40,1,'takepos',0,100,0)");
+	$liveHook = new StorageFixtureHook($db);
+	$liveInvoice = new StorageFixtureInvoice($db, (object) array('rowid' => 40, 'entity' => 1, 'fk_statut' => 0, 'total_ttc' => 100, 'module_source' => 'takepos'));
+	storageCheck($liveHook->doActions(array('context' => 'takeposinvoice'), $liveInvoice, $action, null) === 0, 'Native header fixture accepted');
+	$db->begin();
+	fixtureSql('UPDATE tpg_test_facture SET fk_statut=1 WHERE rowid=40');
+	fixtureSql('INSERT INTO tpg_test_paiement VALUES (4000,1)');
+	fixtureSql('INSERT INTO tpg_test_paiement_facture VALUES (4000,40,40,40)');
+	$liveHook->completeTakePosInvoiceHeader(array('context' => 'takeposinvoice'), $liveInvoice, $action, null);
+	storageCheck($storage->fetchAttempt(40, $_GET['takeposguard_token'])->status === 'PROCESSING', 'Early header never releases an open transaction');
+	$db->commit();
+	$liveHook->completeTakePosInvoiceHeader(array('context' => 'takeposinvoice'), $liveInvoice, $action, null);
+	storageCheck($storage->fetchAttempt(40, $_GET['takeposguard_token'])->status === 'SUCCESS'
+		&& $storage->fetchInvoiceLock(40) === null && (int) $liveInvoice->status === 1, 'Post-commit native header finalizes, releases and refreshes');
+	storageCheck($liveHook->finalizePayment() === false, 'Repeated finalization has no effects');
+	$_GET = array();
+	require_once __DIR__.'/../class/takeposguardattemptservice.class.php';
+	$service = new TakeposguardAttemptService($db, $storage);
+	storageCheck($service->resolve('12345678-1234-4234-8234-123456789af2', 1) === 'SUCCESS', 'Cashier can resolve confirmed result without replay');
+	storageCheck($service->resolve('12345678-1234-4234-8234-123456789af2', 2) === 'UNKNOWN', 'Another cashier cannot inspect or recover a token');
+	storageCheck($service->resolve('12345678-1234-4234-8234-123456789af2', 2, true) === 'SUCCESS', 'Maintenance may resolve another cashier attempt');
+	storageCheck($service->resolve('invalid', 1) === 'UNKNOWN', 'Recovery validates token');
+	storageCheck($service->resolve('12345678-1234-4234-8234-123456789aff', 1) === 'UNKNOWN', 'Unknown token does not authorize a retry');
+	$recoverToken = '12345678-1234-4234-8234-123456789af3';
+	fixtureSql("INSERT INTO tpg_test_facture VALUES (41,1,'takepos',0,100,0)");
+	$recoverLock = new TakeposguardLock($db);
+	storageCheck($recoverLock->acquire(41, $recoverToken, 120) === 1 && $storage->createProcessing(41, $recoverToken, 1), 'Status recovery fixture');
+	storageCheck($finalizer->reconcile(40, $recoverToken, $recoverLock) === false, 'Lock for another invoice cannot finalize');
+	storageCheck($finalizer->reconcile(41, '12345678-1234-4234-8234-123456789af4', $recoverLock) === false, 'Lock for another token cannot finalize');
+	storageCheck($service->resolve($recoverToken, 1) === 'PROCESSING', 'Status check cannot displace live same-session ownership');
+	$recoverLock->abandon();
+	storageCheck($service->resolve($recoverToken, 1) === 'PROCESSING', 'Status check respects durable unexpired metadata');
+	fixtureSql("UPDATE tpg_test_takeposguard_invoice_lock SET expires_at='2020-01-01 00:00:00' WHERE entity=1 AND fk_invoice=41");
+	storageCheck($service->resolve($recoverToken, 1) === 'FAILED' && $storage->fetchInvoiceLock(41) === null, 'Status endpoint reconciles expired no-effect attempt and releases lock');
+	fixtureSql("INSERT INTO tpg_test_facture VALUES (42,1,'takepos',0,100,0)");
+	$orphan = new TakeposguardLock($db);
+	$orphanToken = '12345678-1234-4234-8234-123456789af4';
+	storageCheck($orphan->acquire(42, $orphanToken, 120) === 1 && $orphan->abandon(), 'Crash between lock acquisition and attempt insertion');
+	fixtureSql("UPDATE tpg_test_takeposguard_invoice_lock SET expires_at='2020-01-01 00:00:00' WHERE entity=1 AND fk_invoice=42");
+	$orphan = new TakeposguardLock($db);
+	storageCheck($orphan->acquire(42, $recoverToken, 120) === 2 && $recovery->recover($orphan, 42)
+		&& $orphan->release(), 'Absent attempt permits safe expired owner replacement without native processing');
 	$conf->entity = 2;
 	$other = new StorageFixtureRepository($db);
 	storageCheck($other->fetchAttempt(1, $a) === null && !$other->completeAttempt(1, $a, 'FAILED', array()), 'Cross-entity access denied');

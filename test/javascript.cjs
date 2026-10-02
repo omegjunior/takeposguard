@@ -28,7 +28,8 @@ function browser(path = 'index.php', parent = null, storage = null) {
 	const window = {
 		URL, URLSearchParams, document: doc, location: new URL('https://pos.test/erp/takepos/' + path),
 		TakeposguardConfig: { enabled: true, basePath: '/erp/takepos/', scope: '1:1', waitSeconds: 120,
-			messages: { pending: 'pending', uncertain: 'uncertain', crypto: 'crypto required', retry: 'retry' } },
+			statusUrl: '/erp/custom/takeposguard/ajax/attempt.php', csrfToken: 'RECOVERY_CSRF',
+			messages: { pending: 'pending', uncertain: 'uncertain', crypto: 'crypto required', retry: 'retry', check: 'check' } },
 		crypto: {
 			randomUUID() { return '12345678-1234-4234-8234-' + (++sequence).toString(16).padStart(12, '0'); },
 			getRandomValues(bytes) { bytes.fill(++sequence); return bytes; }
@@ -82,7 +83,7 @@ check(main.jQuery.ajax({ url: 'invoice.php?place=0&action=valid' }).aborted && m
 first.xhr.finish(200, 'native fragment without commit evidence');
 check(main.Takeposguard.getState().token === uuid && main.Takeposguard.getState().phase === 'uncertain', 'HTTP 200 alone does not rotate token');
 check(main.DirectPayment() === false, 'No new native payment after uncertain response');
-main.document.getElementById('takeposguard-status').children[0].listeners.click();
+main.document.getElementById('takeposguard-status').children.find(button => button.textContent === 'retry').listeners.click();
 check(new URL(main.sent[1].options.url).searchParams.get('takeposguard_token') === uuid, 'Controlled retry retains exact token');
 main.sent[1].xhr.finish(200, 'updated fragment', { 'X-Takeposguard-Token': uuid, 'X-Takeposguard-Status': 'SUCCESS' });
 check(main.Takeposguard.getState() === null && !main.button.disabled && main.lastHtml === 'updated fragment', 'Matching confirmed outcome resets UI and updates retry fragment');
@@ -166,6 +167,39 @@ check(explicit.Takeposguard.getState() === null && !explicit.button.disabled, 'C
 explicit.time += 1000;
 explicit.jQuery.ajax({ url: 'invoice.php?action=valid&takeposguard_token=' + supplied });
 check(explicit.Takeposguard.getState().token === supplied, 'Replay with supplied UUID reaches server with same UUID');
+const recovered = browser(); recovered.run(); recovered.ready();
+recovered.jQuery.ajax({ url: 'invoice.php?action=valid&invoiceid=100' }).finish(0);
+const recoveryToken = recovered.Takeposguard.getState().token;
+recovered.Takeposguard.checkResult(); recovered.Takeposguard.checkResult();
+check(recovered.sent.length === 2 && recovered.sent[1].options.type === 'POST'
+	&& recovered.sent[1].options.data.token === 'RECOVERY_CSRF'
+	&& recovered.sent[1].options.data.takeposguard_token === recoveryToken,
+	'Recovery is one explicit CSRF-protected POST using original token');
+recovered.sent[1].xhr.finish(200, { operation_token: recoveryToken, status: 'PROCESSING' });
+check(recovered.Takeposguard.getState().token === recoveryToken && !recovered.Takeposguard.getState().checking,
+	'Live processing keeps uncertainty and permits a later status check');
+recovered.Takeposguard.checkResult();
+recovered.sent[2].xhr.finish(200, { operation_token: 'wrong', status: 'SUCCESS' });
+check(recovered.Takeposguard.getState() !== null, 'Uncorrelated status cannot clear an attempt');
+recovered.Takeposguard.checkResult();
+recovered.sent[3].xhr.finish(200, { operation_token: recoveryToken, status: 'BLOCKED' });
+check(recovered.Takeposguard.getState() !== null, 'Ambiguous server evidence prevents a new attempt');
+recovered.Takeposguard.checkResult();
+recovered.sent[4].xhr.finish(200, { operation_token: recoveryToken, status: 'SUCCESS' });
+check(recovered.Takeposguard.getState() === null && !recovered.button.disabled, 'Confirmed recovery releases ordinary payment buttons');
+const reloadValues = new Map();
+const lost = browser('index.php', null, reloadValues); lost.run(); lost.ready();
+lost.jQuery.ajax({ url: 'invoice.php?action=valid&invoiceid=101' }).finish(0);
+const loaded = browser('index.php', null, reloadValues); loaded.run(); loaded.ready();
+loaded.Takeposguard.checkResult();
+check(loaded.sent.length === 1 && loaded.sent[0].options.url === loaded.TakeposguardConfig.statusUrl,
+	'Reloaded screen resolves saved token without native payment replay');
+loaded.sent[0].xhr.finish(200, { operation_token: loaded.Takeposguard.getState().token, status: 'FAILED' });
+check(loaded.Takeposguard.getState() === null, 'Recovered ordinary failure permits a controlled new attempt');
+const charged = browser(); charged.run(); charged.ready(); charged.Takeposguard.begin('invoice:102', 'stripe'); charged.Takeposguard.uncertain();
+charged.Takeposguard.checkResult();
+charged.sent[0].xhr.finish(200, { operation_token: charged.Takeposguard.getState().token, status: 'FAILED' });
+check(charged.Takeposguard.getState().provider === 'stripe', 'Native failure never authorizes a second uncertain provider charge');
 (async function () {
 	const stripe = browser('pay.php?invoiceid=90');
 	stripe.terminal = { collectPaymentMethod: () => Promise.resolve({ error: { message: 'collection cancelled' } }) };

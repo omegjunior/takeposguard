@@ -88,6 +88,26 @@ class TakeposguardStorage
 		return $this->fetchOne('SELECT * FROM '.MAIN_DB_PREFIX.'takeposguard_invoice_lock'.$this->scope($invoiceId));
 	}
 
+	/** @return array|false Native snapshot, read only after native transaction ends */
+	public function getInvoiceSnapshot($invoiceId)
+	{
+		$this->error = '';
+		return (int) $invoiceId > 0 ? $this->invoiceSnapshot($invoiceId) : $this->fail('TakeposguardInvalidIdentity');
+	}
+
+	/** @return object|null|false New linked payment, never an unrelated entity/invoice */
+	public function fetchNewPayment($invoiceId, $lastPaymentBefore)
+	{
+		$this->error = '';
+		if ((int) $invoiceId < 1 || (int) $lastPaymentBefore < 0) {
+			return $this->fail('TakeposguardInvalidIdentity');
+		}
+		return $this->fetchOne('SELECT p.rowid, pf.amount FROM '.MAIN_DB_PREFIX.'paiement p'
+			.' INNER JOIN '.MAIN_DB_PREFIX.'paiement_facture pf ON pf.fk_paiement = p.rowid'
+			.' WHERE p.entity = '.$this->entity.' AND pf.fk_facture = '.((int) $invoiceId)
+			.' AND p.rowid > '.((int) $lastPaymentBefore).' ORDER BY p.rowid DESC');
+	}
+
 	/**
 	 * Record a processing attempt atomically; uniqueness is enforced by the DB.
 	 * Metadata contains claimed terminal/payment_code/requested_amount/IP/UA.

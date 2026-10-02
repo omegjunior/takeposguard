@@ -1,5 +1,13 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.7.0
+
+- Finalisation après commit/rollback au hook natif, à partir du statut, du solde et des paiements persistants ; résultat enregistré avant libération du verrou.
+- En-têtes de résultat corrélés au jeton, refus du rejeu et possibilité d’un nouveau paiement partiel après résultat confirmé.
+- Récupération des propriétaires expirés sous exclusion ; effets ambigus bloqués et callback shutdown compatible avec la fermeture native de la connexion.
+- POST de consultation/récupération authentifié avec CSRF, isolation par entité et contrôle auteur/maintenance ; commande JavaScript sans relance de paiement.
+- Tests MariaDB de commit/rollback et interruptions PHP, concurrence, décisions conservatrices et récupération du navigateur ; recette HTTP native et prestataires encore requise.
+
 ## 0.6.0
 
 - Protection JavaScript des fonctions de paiement natives, directes, Stripe Terminal et SumUp ; état partagé avec la fenêtre parente.

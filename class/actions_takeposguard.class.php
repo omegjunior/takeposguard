@@ -4,6 +4,7 @@
  */
 require_once __DIR__.'/takeposguardlock.class.php';
 require_once __DIR__.'/takeposguardpaymentpolicy.class.php';
+require_once __DIR__.'/takeposguardrecovery.class.php';
 
 /** Guard the native action without opening a transaction or creating payments. */
 class ActionsTakeposguard
@@ -19,6 +20,9 @@ class ActionsTakeposguard
 	/** @var TakeposguardPaymentPolicy|null */
 	protected $paymentPolicy;
 	private $guardedInvoiceId = 0;
+	private $operationToken = '';
+	private $paymentStorage;
+	private $finalized = false;
 
 	/** @param DoliDB $db Database handler */
 	public function __construct($db)
@@ -57,21 +61,28 @@ class ActionsTakeposguard
 		$policy = null;
 		$persisting = false;
 		try {
+			$storage = $this->newStorage();
 			$lock = $this->newLock();
 			$result = $lock->acquire((int) $object->id, $token, getDolGlobalInt('TAKEPOSGUARD_LOCK_TIMEOUT', 120));
 			if ($result === TakeposguardLock::RECOVERY_REQUIRED) {
-				// Expiration alone never proves an interrupted payment can be retried.
-				$lock->abandon();
-				return $this->block('TakeposguardPaymentRecoveryRequired', $object);
+				$recovery = new TakeposguardRecovery($this->db, $storage);
+				if (!$recovery->recover($lock, (int) $object->id)) {
+					$lock->abandon();
+					return $this->block('TakeposguardPaymentRecoveryRequired', $object);
+				}
+				$result = TakeposguardLock::ACQUIRED;
 			}
 			if ($result !== TakeposguardLock::ACQUIRED) {
 				return $this->block($result === TakeposguardLock::BUSY
 					? 'TakeposguardPaymentBusy' : 'TakeposguardPaymentTechnicalFailure', $object);
 			}
-			$storage = $this->newStorage();
 			$previous = $storage->fetchTokenOwner($token);
 			if ($previous === false || $previous !== null) {
 				$lock->release();
+				if ($previous && (int) $previous->fk_invoice === (int) $object->id) {
+					$this->emitOutcome($previous->status, $token);
+					$object->fetch((int) $object->id);
+				}
 				return $this->block($previous === false ? 'TakeposguardPaymentTechnicalFailure'
 					: 'TakeposguardPaymentTokenUsed', $object);
 			}
@@ -118,9 +129,15 @@ class ActionsTakeposguard
 			$this->paymentLock = $lock;
 			$this->paymentPolicy = $policy;
 			$this->guardedInvoiceId = (int) $object->id;
+			$this->operationToken = $token;
+			$this->paymentStorage = $storage;
+			// Keep native fragment output buffered so post-commit headers can still be sent.
+			if (PHP_SAPI !== 'cli' && !headers_sent()) {
+				ob_start();
+			}
+			register_shutdown_function(array($this, 'shutdownPayment'));
 			$this->results['takeposguard'] = array('invoice_id' => (int) $object->id, 'operation_token' => $token);
 			$this->diagnostic('TakeposguardPaymentAccepted');
-			// Completion/reconciliation is a subsequent stage. Do not infer success here.
 			return 0;
 		} catch (Throwable $exception) {
 			if ($policy !== null) {
@@ -141,15 +158,70 @@ class ActionsTakeposguard
 		}
 	}
 
-	/** @return int Rendering hook after native commit/rollback; no finalization yet */
+	/** @return int Rendering hook after native commit/rollback */
 	public function completeTakePosInvoiceHeader($parameters, &$object, &$action, $hookmanager)
 	{
 		$contexts = explode(':', isset($parameters['context']) ? $parameters['context'] : '');
 		if ($this->paymentPolicy !== null && in_array('takeposinvoice', $contexts, true)
 			&& is_object($object) && (int) $object->id === $this->guardedInvoiceId) {
 			$this->paymentPolicy->restore();
+			$this->finalizePayment();
+			// Do not leave the rendering object with a pre-transaction status/balance.
+			if ($this->finalized) {
+				$object->fetch($this->guardedInvoiceId);
+			}
 		}
 		return 0;
+	}
+
+	/** @return string|false Persist the outcome before releasing the owned lock */
+	public function finalizePayment()
+	{
+		if ($this->finalized || !$this->paymentLock || empty($this->db->connected)
+			|| (int) $this->db->transaction_opened !== 0) {
+			return false;
+		}
+		try {
+			$finalizer = new TakeposguardFinalizer($this->db, $this->paymentStorage);
+			$status = $finalizer->reconcile($this->guardedInvoiceId, $this->operationToken, $this->paymentLock);
+			if (in_array($status, array('SUCCESS', 'FAILED'), true) && $this->paymentLock->release()) {
+				$this->finalized = true;
+				$this->emitOutcome($status, $this->operationToken);
+				$this->diagnostic('TakeposguardFinalized'.$status);
+				return $status;
+			}
+			// Preserve ownership metadata for a later request; never delete ambiguous history.
+			$this->paymentLock->abandon();
+			$this->finalized = true;
+			$this->diagnostic('TakeposguardPaymentRecoveryRequired');
+		} catch (Throwable $exception) {
+			try {
+				$this->paymentLock->abandon();
+			} catch (Throwable $cleanupError) {
+				// Preserve the durable owner if the connection/transaction cannot be used.
+			}
+			$this->diagnostic('TakeposguardPaymentTechnicalFailure');
+		}
+		return false;
+	}
+
+	/** @return void Native dol_shutdown may already have closed/rolled back this session */
+	public function shutdownPayment()
+	{
+		if ($this->paymentPolicy) {
+			$this->paymentPolicy->restore();
+		}
+		// With an open transaction or closed connection, expiry and later recovery apply.
+		$this->finalizePayment();
+	}
+
+	/** @return void Correlate immutable DB outcomes, never infer from HTTP completion */
+	private function emitOutcome($status, $token)
+	{
+		if (in_array($status, array('SUCCESS', 'FAILED'), true) && !headers_sent()) {
+			header('X-Takeposguard-Status: '.$status);
+			header('X-Takeposguard-Token: '.$token);
+		}
 	}
 
 	/** @return TakeposguardLock Factory also permits isolated orchestration tests */

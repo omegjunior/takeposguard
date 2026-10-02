@@ -40,6 +40,8 @@ class InterceptionInvoice
 }
 class InterceptionLock
 {
+	public $previousToken = '';
+	public function holdsInvoice($id, $token) { return false; }
 	public $result = TakeposguardLock::ACQUIRED;
 	public $released = 0;
 	public $abandoned = 0;

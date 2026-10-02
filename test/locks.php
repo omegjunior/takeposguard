@@ -19,12 +19,23 @@ define('MAIN_DB_PREFIX', $prefix);
 require_once DOL_DOCUMENT_ROOT.'/core/lib/functions.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 require_once __DIR__.'/../class/takeposguardlock.class.php';
+require_once __DIR__.'/../class/takeposguardrecovery.class.php';
 $conf = new stdClass();
 $conf->entity = 1;
 $conf->global = new stdClass();
 $conf->modules = array();
 $conf->db = new stdClass();
 $conf->db->dolibarr_main_db_collation = isset($dolibarr_main_db_collation) ? $dolibarr_main_db_collation : 'utf8_unicode_ci';
+/** Minimal transaction fixture: real locks/history, simulated native validation SQL only. */
+class CrashFixtureStorage extends TakeposguardStorage
+{
+	protected function invoiceSnapshot($invoiceId)
+	{
+		$result = $this->db->query('SELECT fk_statut FROM '.MAIN_DB_PREFIX.'facture WHERE entity='.$this->entity.' AND rowid='.((int) $invoiceId));
+		$row = $result ? $this->db->fetch_object($result) : false;
+		return $row ? array('status' => (int) $row->fk_statut, 'remain' => 100, 'payment_count' => 0, 'last_payment' => 0) : false;
+	}
+}
 function lockTestConnection()
 {
 	global $dolibarr_main_db_type, $dolibarr_main_db_host, $dolibarr_main_db_user,
@@ -71,6 +82,26 @@ if ($worker) {
 		echo json_encode(array('result' => $result, 'error' => $lock->error))."\n";
 		flush();
 		if ($result === TakeposguardLock::ACQUIRED) {
+			if (in_array($argv[6], array('crash-commit', 'crash-rollback'), true)) {
+				// Same callback order as main.inc.php: close DB before module shutdown.
+				register_shutdown_function('dol_shutdown');
+				$storage = new CrashFixtureStorage($db);
+				if (!$storage->createProcessing(1, $argv[3], 1)) {
+					throw new RuntimeException('Crash attempt unavailable');
+				}
+				register_shutdown_function(function () use ($db, $storage, $lock) {
+					$finalizer = new TakeposguardFinalizer($db, $storage);
+					if ($finalizer->reconcile(1, $GLOBALS['argv'][3], $lock) !== false) {
+						throw new RuntimeException('Closed connection must not finalize');
+					}
+				});
+				$db->begin();
+				lockTestQuery($db, 'UPDATE '.MAIN_DB_PREFIX.'facture SET fk_statut=1 WHERE rowid=1');
+				if ($argv[6] === 'crash-commit') {
+					$db->commit();
+				}
+				exit(0); // An open transaction rolls back on native session closure.
+			}
 			if ($argv[6] === 'crash') {
 				exit(0);
 			}
@@ -150,13 +181,13 @@ try {
 	$db = lockTestConnection();
 	$second = lockTestConnection();
 	mkdir($dir);
-	foreach (array('llx_takeposguard_invoice_lock.sql', 'llx_takeposguard_invoice_lock.key.sql') as $file) {
-		$tables[] = MAIN_DB_PREFIX.'takeposguard_invoice_lock';
+	foreach (array('llx_takeposguard_invoice_lock.sql', 'llx_takeposguard_invoice_lock.key.sql', 'llx_takeposguard_payment_attempt.sql', 'llx_takeposguard_payment_attempt.key.sql') as $file) {
+		$tables[] = MAIN_DB_PREFIX.(strpos($file, 'payment_attempt') !== false ? 'takeposguard_payment_attempt' : 'takeposguard_invoice_lock');
 		lockCheck(run_sql(__DIR__.'/../sql/'.$file, 1, 0, 1, '', 'none') > 0, 'Install lock fixture');
 	}
 	$tables[] = MAIN_DB_PREFIX.'facture';
-	lockTestQuery($db, 'CREATE TABLE '.MAIN_DB_PREFIX.'facture (rowid integer PRIMARY KEY, entity integer, module_source varchar(32)) ENGINE=innodb');
-	lockTestQuery($db, "INSERT INTO ".MAIN_DB_PREFIX."facture VALUES (1,1,'takepos'),(2,2,'takepos'),(3,1,'other')");
+	lockTestQuery($db, 'CREATE TABLE '.MAIN_DB_PREFIX.'facture (rowid integer PRIMARY KEY, entity integer, module_source varchar(32), fk_statut integer DEFAULT 0) ENGINE=innodb');
+	lockTestQuery($db, "INSERT INTO ".MAIN_DB_PREFIX."facture(rowid,entity,module_source) VALUES (1,1,'takepos'),(2,2,'takepos'),(3,1,'other')");
 	$a = '12345678-1234-4234-8234-123456789abc';
 	$b = '12345678-1234-4234-8234-123456789abd';
 	$first = new TakeposguardLock($db);
@@ -230,6 +261,24 @@ try {
 	lockCheck(!$lost->release(), 'Previous owner cannot erase replacement');
 	$row = $db->fetch_object(lockTestQuery($db, 'SELECT operation_token FROM '.MAIN_DB_PREFIX.'takeposguard_invoice_lock WHERE entity=1 AND fk_invoice=1'));
 	lockCheck($row->operation_token === $b && $other->release(), 'Replacement metadata preserved');
+	foreach (array('crash-commit', 'crash-rollback') as $offset => $mode) {
+		$crashToken = sprintf('12345678-1234-4234-8234-%012x', 200 + $offset);
+		lockTestQuery($db, 'UPDATE '.MAIN_DB_PREFIX.'facture SET fk_statut=0 WHERE rowid=1');
+		$start = $dir.DIRECTORY_SEPARATOR.$mode.'-start';
+		$workers = array(lockWorker($crashToken, $start, $stop, $mode));
+		file_put_contents($start, 'start');
+		lockCheck(lockWorkerResult($workers[0]) === 1, 'Interrupted native fixture acquired '.$mode);
+		lockWorkerFinish($workers[0]);
+		$workers = array();
+		$storage = new CrashFixtureStorage($db);
+		lockCheck($storage->fetchAttempt(1, $crashToken)->status === 'PROCESSING', 'Native shutdown never assumes success '.$mode);
+		lockTestQuery($db, 'UPDATE '.MAIN_DB_PREFIX.'takeposguard_invoice_lock SET expires_at=DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 SECOND) WHERE entity=1 AND fk_invoice=1');
+		$replacement = new TakeposguardLock($db);
+		$recover = new TakeposguardRecovery($db, $storage);
+		lockCheck($replacement->acquire(1, $b, 10) === 2 && $recover->recover($replacement, 1), 'Expired crash reconciled under exclusion '.$mode);
+		lockCheck($storage->fetchAttempt(1, $crashToken)->status === ($mode === 'crash-commit' ? 'SUCCESS' : 'FAILED'), 'Commit versus automatic rollback distinguished '.$mode);
+		lockCheck($replacement->release(), 'Recovered lock released '.$mode);
+	}
 	lockTestQuery($db, 'DROP TABLE '.MAIN_DB_PREFIX.'takeposguard_invoice_lock');
 	lockCheck($first->acquire(1, $a, 10) === -1 && !$first->isHeld(), 'Missing schema fails closed and unlocks');
 	echo $checks." lock checks passed on MariaDB, including two-process races.\n";
@@ -261,7 +310,7 @@ try {
 		}
 		foreach (array_unique($tables) as $table) {
 			// Never drop any table outside the exact random test namespace.
-			if ($table === MAIN_DB_PREFIX.'facture' || $table === MAIN_DB_PREFIX.'takeposguard_invoice_lock') {
+			if (in_array($table, array(MAIN_DB_PREFIX.'facture', MAIN_DB_PREFIX.'takeposguard_invoice_lock', MAIN_DB_PREFIX.'takeposguard_payment_attempt'), true)) {
 				$db->query('DROP TABLE IF EXISTS '.$table);
 			}
 		}

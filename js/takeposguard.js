@@ -73,14 +73,20 @@
 				}
 				panel.hidden = !busy;
 				var message = busy && state.phase === 'pending' ? config.messages.pending : config.messages.uncertain;
-				if (panel.getAttribute('data-phase') !== (busy ? state.phase : 'idle')) {
+				var phase = busy ? state.phase + (state.checking ? ':checking' : '') : 'idle';
+				if (panel.getAttribute('data-phase') !== phase) {
 					panel.textContent = message;
-					panel.setAttribute('data-phase', busy ? state.phase : 'idle');
+					panel.setAttribute('data-phase', phase);
+					if (busy && state.phase === 'uncertain' && config.statusUrl) {
+						var check = doc.createElement('button'); check.type = 'button'; check.className = 'button';
+						check.textContent = config.messages.check; check.disabled = !!state.checking;
+						check.addEventListener('click', checkResult); panel.appendChild(check);
+					}
 					if (busy && state.phase === 'uncertain' && !state.provider && state.request && !state.active) {
 						var retry = doc.createElement('button'); retry.type = 'button'; retry.className = 'button';
 						retry.textContent = config.messages.retry;
 						retry.addEventListener('click', function () {
-							if (!state || state.active || !state.request) { return; }
+							if (!state || state.active || state.checking || !state.request) { return; }
 							// Repeat only the exact native request with the original attempt token.
 							owner.jQuery.ajax(Object.assign({}, state.request)).done(function (html) {
 								owner.jQuery('#poslines').html(html);
@@ -93,6 +99,20 @@
 		}
 		function uncertain() {
 			if (state) { state.phase = 'uncertain'; save(); paint(); }
+		}
+		function checkResult() {
+			if (!state || state.active || state.checking || !config.statusUrl) { return; }
+			var current = state; current.checking = true; paint();
+			owner.jQuery.ajax({ url: config.statusUrl, type: 'POST', dataType: 'json',
+				data: { action: 'recover', token: config.csrfToken, takeposguard_token: current.token }
+			}).done(function (result) {
+				if (state !== current || !result || result.operation_token !== current.token) { return; }
+				if (result.status === 'SUCCESS' || (result.status === 'FAILED' && !current.provider)) {
+					settledUntil = Date.now() + 600; state = null; save(); paint();
+				}
+			}).always(function () {
+				if (state === current) { current.checking = false; uncertain(); }
+			});
 		}
 		function begin(key, provider, suppliedToken) {
 			if (state || Date.now() < settledUntil) { return false; }
@@ -157,7 +177,7 @@
 				xhr.always(function () {
 					if (state !== current) { return; }
 					state.active = false;
-					// HTTP 200 is not evidence of native commit. Step 7 will emit these headers.
+					// Only token-correlated server evidence authorizes clearing this attempt.
 					var outcome = xhr.getResponseHeader('X-Takeposguard-Status');
 					var responseToken = xhr.getResponseHeader('X-Takeposguard-Token');
 					if (responseToken === state.token && (outcome === 'SUCCESS' || (outcome === 'FAILED' && !state.provider))) {
@@ -174,7 +194,7 @@
 			}
 		}
 		guard = {
-			begin: begin, uncertain: uncertain, installAjax: installAjax, paint: paint,
+			begin: begin, uncertain: uncertain, installAjax: installAjax, paint: paint, checkResult: checkResult,
 			cancelProvider: cancelProvider,
 			addView: function (view) { if (views.indexOf(view) < 0) { views.push(view); } installAjax(view); paint(); },
 			getState: function () { return state; }

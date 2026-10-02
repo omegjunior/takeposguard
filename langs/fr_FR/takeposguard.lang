@@ -37,3 +37,4 @@ TakeposguardJavascriptPending=Paiement en cours. Veuillez patienter.
 TakeposguardJavascriptUncertain=Le résultat du paiement doit être vérifié. Ne lancez pas un nouveau débit ; consultez la facture ou contactez votre administrateur.
 TakeposguardJavascriptCryptoRequired=La génération sécurisée du jeton de paiement est indisponible dans ce navigateur. Le paiement a été bloqué.
 TakeposguardJavascriptRetry=Retenter la même requête, sans nouveau jeton
+TakeposguardJavascriptCheck=Vérifier le résultat

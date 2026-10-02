@@ -166,6 +166,13 @@ class TakeposguardLock
 		return $row && (int) $row->owned === 1;
 	}
 
+	/** @return bool Exact durable owner (previous token while recovery is pending) */
+	public function holdsInvoice($invoiceId, $token)
+	{
+		$owner = $this->recovery ? $this->previousToken : $this->token;
+		return (int) $invoiceId === $this->invoiceId && TakeposguardStorage::normalizeToken($token) === $owner && $this->isHeld();
+	}
+
 	/** @return bool Remove owned metadata after native completion, then unlock */
 	public function release()
 	{

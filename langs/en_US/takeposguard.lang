@@ -37,3 +37,4 @@ TakeposguardJavascriptPending=Payment in progress. Please wait.
 TakeposguardJavascriptUncertain=The payment outcome must be checked. Do not start another charge; check the invoice or contact your administrator.
 TakeposguardJavascriptCryptoRequired=Secure payment token generation is unavailable in this browser. Payment was blocked.
 TakeposguardJavascriptRetry=Retry the same request without a new token
+TakeposguardJavascriptCheck=Check payment result
