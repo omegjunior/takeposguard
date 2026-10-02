@@ -83,3 +83,27 @@ function takeposguardAdminPrepareHead()
 
 	return $head;
 }
+
+/**
+ * Validate setup values before any database write.
+ *
+ * @param string $type Setting type
+ * @param string $value Submitted value
+ * @return bool
+ */
+function takeposguardValidateSetting($type, $value)
+{
+	if ($type === 'boolean') {
+		return $value === '0' || $value === '1';
+	}
+	if ($type === 'policy') {
+		return $value === 'reject';
+	}
+	if (!preg_match('/^[1-9][0-9]{0,3}$/D', $value)) {
+		return false;
+	}
+	if ($type === 'seconds') {
+		return (int) $value >= 10 && (int) $value <= 3600;
+	}
+	return $type === 'days' && (int) $value >= 1 && (int) $value <= 3650;
+}
