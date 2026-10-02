@@ -1,5 +1,13 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.5.0
+
+- Vérification serveur du solde et du statut avant un nouveau paiement partiel, avec prise en charge du signe des avoirs.
+- Neutralisation de la boucle native de stock avec lots lors d’un paiement ultérieur, uniquement après preuve persistante de la validation initiale réussie.
+- Surcharge en mémoire de la configuration du terminal, restaurée au hook de rendu après commit/rollback et au shutdown en cas de sortie anticipée.
+- Refus des factures anciennes sans preuve lorsque le déstockage avec lots est actif ; aucun mouvement supprimé ou réparé.
+- Tests de l’interception, de l’historique SQL, du bloc de stock natif avec doubles et de la restauration après sortie PHP.
+
 ## 0.4.0
 
 - Interception `takeposinvoice/doActions` avant la transaction native : droits, entité, origine, UUID v4, exclusion et historique.

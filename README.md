@@ -2,9 +2,9 @@
 
 Module externe indépendant installé dans `htdocs/custom/takeposguard`, sans modification du cœur Dolibarr.
 
-## État de la version 0.4.0
+## État de la version 0.5.0
 
-Cette version implémente les points 1 à 4 : configuration, stockage, verrou exclusif et interception serveur `doActions()`. **Elle reste intermédiaire et ne doit pas être activée pour un usage normal.** L’option désactivée conserve l’action native. Si elle est activée, un UUID v4 est obligatoire : le JavaScript déclaré ne fournit pas encore de jeton, donc l’écran natif sans intégration adaptée est bloqué. Une tentative acceptée reste `PROCESSING` jusqu’à l’implémentation de la finalisation ; aucun succès n’est déduit en fin de requête. Aucun trigger n’est ajouté.
+Cette version implémente les points 1 à 5 : configuration, stockage, verrou exclusif, interception serveur et protection du stock lors des paiements partiels. **Elle reste intermédiaire et ne doit pas être activée pour un usage normal.** L’option désactivée conserve l’action native. Si elle est activée, un UUID v4 est obligatoire : le JavaScript déclaré ne fournit pas encore de jeton, donc l’écran natif sans intégration adaptée est bloqué. Une tentative acceptée reste `PROCESSING` jusqu’à l’implémentation de la finalisation ; aucun succès n’est déduit en fin de requête. Aucun trigger n’est ajouté.
 
 ## Installation
 
@@ -45,7 +45,7 @@ Pour le stockage, exécuter `php test/storage.php --mysql` depuis le dossier du 
 
 `php test/sql_portability.php` vérifie la conversion des scripts par le pilote PostgreSQL Dolibarr, sans connexion PostgreSQL. Ce contrôle ne remplace pas un test d'installation et d'exécution sur ce moteur.
 
-Résultats exécutés localement : 56 contrôles de schéma/stockage sur MariaDB via le pilote `mysqli`, 18 cas de configuration et contrôles du descripteur, conversion de neuf instructions SQL par le pilote PostgreSQL. L'activation réelle dans l'interface n'a pas été exécutée.
+Résultats exécutés localement : 64 contrôles de schéma/stockage sur MariaDB via le pilote `mysqli`, 18 cas de configuration et contrôles du descripteur, conversion de neuf instructions SQL par le pilote PostgreSQL. L'activation réelle dans l'interface n'a pas été exécutée.
 
 Les tests de concurrence du verrou sont décrits ci-dessous. Les tests de paiement et stock après interception appartiennent aux étapes suivantes. Cette version ne doit pas être utilisée comme protection en production.
 
@@ -92,7 +92,7 @@ Après le verrou consultatif, un `INSERT` atomique crée les métadonnées. Il e
 
 Un traitement encore actif garde son verrou consultatif même lorsque l'expiration est dépassée. Une seconde session ne peut pas le déloger. La durée configurée est donc un délai minimal avant récupération d'une session interrompue, et non une autorisation d'interrompre un paiement actif.
 
-Après une interruption, la fermeture de la connexion libère le verrou consultatif ; les métadonnées persistent. Tant qu'elles ne sont pas expirées, les nouvelles tentatives restent bloquées. Après expiration, `RECOVERY_REQUIRED` expose le jeton précédent via `previousToken`. L'appelant devra réconcilier la tentative et les effets natifs sous le verrou avant `confirmRecovery($expectedToken)`. Cette méthode remplace uniquement le propriétaire attendu encore expiré. La réconciliation automatique et le secours `register_shutdown_function()` ne sont pas implémentés à cette étape.
+Après une interruption, la fermeture de la connexion libère le verrou consultatif ; les métadonnées persistent. Tant qu'elles ne sont pas expirées, les nouvelles tentatives restent bloquées. Après expiration, `RECOVERY_REQUIRED` expose le jeton précédent via `previousToken`. L'appelant devra réconcilier la tentative et les effets natifs sous le verrou avant `confirmRecovery($expectedToken)`. Cette méthode remplace uniquement le propriétaire attendu encore expiré. La réconciliation automatique et le secours shutdown pour les tentatives/verrous ne sont pas implémentés à cette étape. Le seul callback shutdown ajouté restaure la configuration locale du stock.
 
 `release()` supprime uniquement la ligne du jeton détenu puis libère le verrou consultatif. `abandon()` garde les métadonnées et libère seulement le verrou consultatif pour une réconciliation ultérieure. Ces deux méthodes refusent de libérer une session dont la transaction native est encore ouverte. Aucun destructeur ne libère automatiquement le verrou pendant un traitement. Si la transaction reste ouverte en fin de requête, conserver le verrou jusqu'à la fermeture de connexion évite d'autoriser une seconde requête avant son rollback.
 
@@ -120,9 +120,27 @@ Tout jeton déjà enregistré est refusé, y compris `FAILED` et `BLOCKED` : une
 
 Un refus retourne `1`, remplace l’action native, publie un message traduit et affiche un fragment HTML échappé dans la réponse AJAX. Les refus avant insertion ne créent pas de ligne d’historique, pour éviter une accumulation de tentatives invalides. Les logs détaillés contiennent uniquement des codes stables, jamais jeton, montant, utilisateur, SQL ou exception brute.
 
-**Limite volontaire de cette étape :** une tentative acceptée reste `PROCESSING` et ses métadonnées de verrou persistent à la fermeture de la session SQL. Une expiration retourne une demande de réconciliation et bloque le paiement ; elle ne supprime ni ne remplace automatiquement le propriétaire. Les étapes de finalisation et récupération permettront les paiements ultérieurs. Aucun nettoyage manuel des lignes `PROCESSING` ne doit servir à contourner cette restriction. Les paiements partiels avec lots, le JavaScript et le secours shutdown seront traités aux étapes prévues.
+**Limite volontaire de cette étape :** une tentative acceptée reste `PROCESSING` et ses métadonnées de verrou persistent à la fermeture de la session SQL. Une expiration retourne une demande de réconciliation et bloque le paiement ; elle ne supprime ni ne remplace automatiquement le propriétaire. Les étapes de finalisation et récupération permettront les paiements ultérieurs. Aucun nettoyage manuel des lignes `PROCESSING` ne doit servir à contourner cette restriction. La politique des paiements partiels avec lots est décrite ci-dessous ; le JavaScript et le secours de finalisation shutdown restent aux étapes prévues.
 
 `php test/interception.php` vérifie l’orchestration avec doubles : option désactivée, autres contextes/actions, droits, facture/entité/origine, jetons invalides et rejoués, refus d’un jeton d’une autre facture, verrou occupé/erreur/récupération, rechargement natif, erreurs de stockage et maintien du verrou avant retour au cœur. Les tests de stockage et de concurrence vérifient séparément les primitives SQL réelles. Ces contrôles ne constituent pas un test HTTP de paiement ni une preuve du nombre de mouvements bancaires/stock ; ceux-ci restent à exécuter après les étapes suivantes.
+
+## Paiements partiels et stock (étape 5)
+
+Après acquisition du verrou et rechargement de la facture, `TakeposguardPaymentPolicy` n’admet que les états natifs brouillon (`0`) ou validé (`1`). Une facture validée doit avoir un reste positif, ou négatif pour un avoir, calculé par `getRemainToPay()` ; le montant JavaScript ne participe jamais à cette décision. Les états payé/clôturé, abandonné, inconnu et les erreurs de calcul sont refusés avant la création d’une tentative. Un nouveau jeton distingue un paiement volontaire du rejeu ; le verrou et la contrainte unique restent obligatoires.
+
+Sans gestion des lots, TakePOS ne déstocke que dans sa branche de validation du brouillon : le module conserve ce traitement natif. Avec `stock` et `productbatch` actifs, le cœur 22.x exécute sa boucle manuelle même sur une facture déjà validée. Le module évite cette répétition en positionnant uniquement dans la mémoire de la requête `CASHDESK_NO_DECREASE_STOCK<terminal>=1` pour un paiement ultérieur. Cela protège aussi les lignes sans lot lorsque le module lots est actif. Le brouillon initial n’est jamais concerné par cette surcharge.
+
+La surcharge exige une preuve en base, dans l’entité et pour la facture : une tentative `SUCCESS`, avec statut initial brouillon, statut final validé/payé et date de finalisation renseignée. Une tentative `PROCESSING`, `FAILED`, `BLOCKED` ou un paiement partiel réussi sur une facture déjà validée ne suffit pas. L’erreur SQL bloque également la requête. Le réglage natif qui désactive déjà le déstockage est respecté sans demander cette preuve.
+
+**Factures anciennes et historique :** en mode lots avec déstockage TakePOS actif, une facture validée sans preuve de validation initiale par le module est refusée. Ni un paiement existant ni la présence isolée d’un mouvement ne prouvent que toutes les lignes ont été traitées. Le module ne supprime aucun mouvement et ne tente pas de réparer des historiques modifiés hors de son contrôle. Une procédure de réconciliation pour les factures anciennes reste à définir ; ne pas fabriquer de lignes `SUCCESS`. La maintenance future devra conserver la preuve initiale tant qu’une facture peut recevoir un paiement partiel.
+
+Le hook `completeTakePosInvoiceHeader`, exécuté après le commit/rollback natif dans le cœur local 22.0.5 inspecté, restaure la valeur d’origine pour la facture protégée. Une sortie anticipée utilise un callback shutdown qui restaure seulement cette configuration en mémoire, y compris si la propriété était absente ou `null`. Ce callback ne finalise pas la tentative, ne déduit aucun succès et ne libère pas de verrou. Aucune constante persistante ni configuration d’une autre requête n’est modifiée.
+
+Cette étape prépare le paiement partiel volontaire mais la version reste intermédiaire : les tentatives d’une vraie requête restent `PROCESSING` tant que l’étape de finalisation n’est pas implémentée. Les tests fournissent explicitement un résultat confirmé et libèrent leurs seuls verrous de fixture ; aucun nettoyage de tentative réelle ne doit contourner cette limite.
+
+Tests exécutés : `php test/interception.php` (51 contrôles), `php test/storage.php --mysql` (64 contrôles), `php test/partial_stock.php` (8 contrôles). Le test MariaDB utilise le hook, le verrou, l’historique et le calcul natif du solde sur tables temporaires. Le dernier test extrait le bloc de stock de `takepos/invoice.php` installé et l’exécute avec des doubles des classes d’écriture : deux appels initiaux, quantités des lignes conservées, zéro appel pour le paiement partiel protégé, restauration après sortie PHP. Il échoue si les bornes du bloc natif changent et exige alors une nouvelle inspection du cœur. Il ne crée aucun mouvement réel et ne vérifie pas les effets internes de `MouvementStock::livraison()`.
+
+Les tests HTTP complets de paiement, banque, stock avec/sans lots et rollback restent à exécuter après JavaScript/finalisation sur une instance de recette. Le cœur local est 22.0.5 ; les constantes, la boucle native et l’ordre des hooks doivent être revérifiés lors d’une montée de version.
 
 ## Licence
 

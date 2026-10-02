@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 require_once __DIR__.'/takeposguardlock.class.php';
+require_once __DIR__.'/takeposguardpaymentpolicy.class.php';
 
 /** Guard the native action without opening a transaction or creating payments. */
 class ActionsTakeposguard
@@ -15,6 +16,9 @@ class ActionsTakeposguard
 	public $resprints = '';
 	/** @var TakeposguardLock|null Kept alive throughout native processing */
 	protected $paymentLock;
+	/** @var TakeposguardPaymentPolicy|null */
+	protected $paymentPolicy;
+	private $guardedInvoiceId = 0;
 
 	/** @param DoliDB $db Database handler */
 	public function __construct($db)
@@ -50,6 +54,7 @@ class ActionsTakeposguard
 			return $this->block('TakeposguardPaymentBusy', $object);
 		}
 		$lock = null;
+		$policy = null;
 		$persisting = false;
 		try {
 			$lock = $this->newLock();
@@ -76,8 +81,26 @@ class ActionsTakeposguard
 				$lock->release();
 				return $this->block('TakeposguardPaymentInvoiceUnavailable', $object);
 			}
+			$policy = new TakeposguardPaymentPolicy();
+			$policyError = $policy->checkInvoice($object);
+			if ($policyError !== '') {
+				$lock->release();
+				return $this->block($policyError, $object);
+			}
+			$terminal = isset($_SESSION['takeposterminal']) ? (string) $_SESSION['takeposterminal'] : '';
+			$suppressStock = (int) $object->status === TakeposguardPaymentPolicy::VALIDATED
+				&& isModEnabled('stock') && isModEnabled('productbatch')
+				&& getDolGlobalString('CASHDESK_NO_DECREASE_STOCK'.$terminal) != '1';
+			if ($suppressStock) {
+				$validation = $storage->fetchSuccessfulValidation((int) $object->id);
+				if (!$validation) {
+					$lock->release();
+					return $this->block($validation === false ? 'TakeposguardPaymentTechnicalFailure'
+						: 'TakeposguardPaymentStockUnproven', $object);
+				}
+			}
 			$metadata = array(
-				'terminal' => isset($_SESSION['takeposterminal']) ? (string) $_SESSION['takeposterminal'] : '',
+				'terminal' => $terminal,
 				'payment_code' => GETPOST('pay', 'aZ09'),
 				// Claims for audit only. Native TakePOS remains responsible for payment validation.
 				'requested_amount' => GETPOSTFLOAT('amount'),
@@ -88,12 +111,21 @@ class ActionsTakeposguard
 				$lock->release();
 				return $this->block('TakeposguardPaymentTechnicalFailure', $object);
 			}
+			if ($suppressStock && !$policy->suppressStock($terminal)) {
+				$lock->abandon();
+				return $this->block('TakeposguardPaymentTechnicalFailure', $object);
+			}
 			$this->paymentLock = $lock;
+			$this->paymentPolicy = $policy;
+			$this->guardedInvoiceId = (int) $object->id;
 			$this->results['takeposguard'] = array('invoice_id' => (int) $object->id, 'operation_token' => $token);
 			$this->diagnostic('TakeposguardPaymentAccepted');
 			// Completion/reconciliation is a subsequent stage. Do not infer success here.
 			return 0;
 		} catch (Throwable $exception) {
+			if ($policy !== null) {
+				$policy->restore();
+			}
 			if ($lock !== null) {
 				try {
 					if ($persisting) {
@@ -107,6 +139,17 @@ class ActionsTakeposguard
 			}
 			return $this->block('TakeposguardPaymentTechnicalFailure', $object);
 		}
+	}
+
+	/** @return int Rendering hook after native commit/rollback; no finalization yet */
+	public function completeTakePosInvoiceHeader($parameters, &$object, &$action, $hookmanager)
+	{
+		$contexts = explode(':', isset($parameters['context']) ? $parameters['context'] : '');
+		if ($this->paymentPolicy !== null && in_array('takeposinvoice', $contexts, true)
+			&& is_object($object) && (int) $object->id === $this->guardedInvoiceId) {
+			$this->paymentPolicy->restore();
+		}
+		return 0;
 	}
 
 	/** @return TakeposguardLock Factory also permits isolated orchestration tests */

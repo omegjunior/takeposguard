@@ -3,7 +3,8 @@
 require_once __DIR__.'/../class/actions_takeposguard.class.php';
 $settings = array('TAKEPOSGUARD_ENABLE' => 1, 'TAKEPOSGUARD_LOCK_TIMEOUT' => 120);
 $input = array('takeposguard_token' => '12345678-1234-4234-8234-123456789abc', 'pay' => 'LIQ', 'amount' => 50);
-$conf = (object) array('entity' => 1);
+$conf = (object) array('entity' => 1, 'global' => new stdClass());
+$modules = array();
 $langs = new class {
 	public function load($name) {}
 	public function trans($key) { return '<'.$key.'>'; }
@@ -15,6 +16,8 @@ $user = new class {
 	public function hasRight($module, $right) { return $this->allowed; }
 };
 function getDolGlobalInt($key, $default = 0) { global $settings; return isset($settings[$key]) ? (int) $settings[$key] : $default; }
+function isModEnabled($key) { global $modules; return !empty($modules[$key]); }
+function getDolGlobalString($key) { global $conf; return isset($conf->global->$key) ? (string) $conf->global->$key : ''; }
 function GETPOST($key, $type) { global $input; return isset($input[$key]) ? $input[$key] : ''; }
 function GETPOSTFLOAT($key) { return (float) GETPOST($key, 'none'); }
 function setEventMessages($message, $errors, $style) {}
@@ -26,9 +29,14 @@ class InterceptionInvoice
 	public $entity = 1;
 	public $module_source = 'takepos';
 	public $status = 0;
+	public $type = 0;
+	public $remain = 100;
+	public $error = '';
+	public $reloadedStatus = 1;
 	public $fetchResult = 1;
 	public $fetches = 0;
-	public function fetch($id) { $this->fetches++; $this->status = 1; return $this->fetchResult; }
+	public function getRemainToPay() { return $this->remain; }
+	public function fetch($id) { $this->fetches++; $this->status = $this->reloadedStatus; return $this->fetchResult; }
 }
 class InterceptionLock
 {
@@ -43,9 +51,12 @@ class InterceptionLock
 class InterceptionStorage
 {
 	public $previous = null;
+	public $validation = true;
+	public $validationReads = 0;
 	public $insertResult = 1;
 	public $creates = 0;
 	public $throws = false;
+	public function fetchSuccessfulValidation($id) { $this->validationReads++; return $this->validation; }
 	public function fetchTokenOwner($token) { return $this->previous; }
 	public function createProcessing($id, $token, $user, $metadata) {
 		$this->creates++;
@@ -109,5 +120,55 @@ try {
 	checkHook(invoke($h, $i)[0] === 1 && $h->storage->creates === 1, 'Repeated hook call cannot accept twice');
 	$h = new InterceptionHook(); $i = new InterceptionInvoice(); $i->status = 1;
 	checkHook(invoke($h, $i)[0] === 0, 'New token on validated invoice can enter native partial payment');
+
+	foreach (array(0, -5) as $remain) {
+		$h = new InterceptionHook(); $i = new InterceptionInvoice(); $i->remain = $remain;
+		checkHook(invoke($h, $i)[0] === 1 && !$h->storage->creates && $h->lock->released === 1, 'No positive balance cannot receive a regular partial payment');
+	}
+	foreach (array(2, 3, 99) as $status) {
+		$h = new InterceptionHook(); $i = new InterceptionInvoice(); $i->reloadedStatus = $status;
+		checkHook(invoke($h, $i)[0] === 1 && !$h->storage->creates, 'Closed/abandoned/unknown invoice status refused');
+	}
+	$h = new InterceptionHook(); $i = new InterceptionInvoice(); $i->type = 2; $i->remain = -50;
+	checkHook(invoke($h, $i)[0] === 0, 'Credit note balance follows native negative direction');
+	foreach (array(INF, NAN, 'not a balance') as $remain) {
+		$h = new InterceptionHook(); $i = new InterceptionInvoice(); $i->remain = $remain;
+		checkHook(invoke($h, $i)[0] === 1 && !$h->storage->creates, 'Unusable native balance is fail closed');
+	}
+	$h = new InterceptionHook(); $i = new InterceptionInvoice(); $i->error = 'NativeCalculationFailed';
+	checkHook(invoke($h, $i)[0] === 1 && !$h->storage->creates, 'Native calculation error blocks partial payment');
+	$h = new InterceptionHook(); $i = new InterceptionInvoice(); $i->type = 2; $i->remain = 50;
+	checkHook(invoke($h, $i)[0] === 1 && !$h->storage->creates, 'Wrong credit-note balance direction refused');
+	$modules = array('stock' => true, 'productbatch' => true); $_SESSION['takeposterminal'] = 1;
+	foreach (array(null, false) as $evidence) {
+		$h = new InterceptionHook(); $h->storage->validation = $evidence;
+		checkHook(invoke($h, new InterceptionInvoice())[0] === 1 && !$h->storage->creates
+			&& !isset($conf->global->CASHDESK_NO_DECREASE_STOCK1), 'Missing evidence/SQL failure blocks before stock override');
+	}
+	$h = new InterceptionHook(); $conf->global->CASHDESK_NO_DECREASE_STOCK1 = '0'; $i = new InterceptionInvoice();
+	checkHook(invoke($h, $i)[0] === 0 && $conf->global->CASHDESK_NO_DECREASE_STOCK1 === '1'
+		&& $h->storage->validationReads === 1, 'Proven validation suppresses manual lot stock during payment');
+	$action = 'valid';
+	$h->completeTakePosInvoiceHeader(array('context' => 'takepospay'), $i, $action, null);
+	checkHook($conf->global->CASHDESK_NO_DECREASE_STOCK1 === '1', 'Unrelated header leaves active override intact');
+	$other = new InterceptionInvoice(); $other->id = 2;
+	$h->completeTakePosInvoiceHeader(array('context' => 'takeposinvoice'), $other, $action, null);
+	checkHook($conf->global->CASHDESK_NO_DECREASE_STOCK1 === '1', 'Another invoice header leaves active override intact');
+	$h->completeTakePosInvoiceHeader(array('context' => 'takeposinvoice'), $i, $action, null);
+	checkHook($conf->global->CASHDESK_NO_DECREASE_STOCK1 === '0' && !$h->lock->released, 'Post-native header restores exact value without releasing lock');
+	unset($conf->global->CASHDESK_NO_DECREASE_STOCK1);
+	$h = new InterceptionHook(); $i = new InterceptionInvoice(); $i->reloadedStatus = 0;
+	checkHook(invoke($h, $i)[0] === 0 && !isset($conf->global->CASHDESK_NO_DECREASE_STOCK1)
+		&& !$h->storage->validationReads, 'Initial draft validation retains native stock handling');
+	$conf->global->CASHDESK_NO_DECREASE_STOCK1 = '1'; $h = new InterceptionHook(); $h->storage->validation = null;
+	checkHook(invoke($h, new InterceptionInvoice())[0] === 0 && !$h->storage->validationReads, 'Explicitly disabled stock keeps native setting');
+	unset($conf->global->CASHDESK_NO_DECREASE_STOCK1);
+	$modules['productbatch'] = false; $h = new InterceptionHook(); $h->storage->validation = null;
+	checkHook(invoke($h, new InterceptionInvoice())[0] === 0 && !$h->storage->validationReads
+		&& !isset($conf->global->CASHDESK_NO_DECREASE_STOCK1), 'No-lot stock partial payment remains native');
+	$modules['productbatch'] = true; $h = new InterceptionHook(); $h->storage->insertResult = false;
+	checkHook(invoke($h, new InterceptionInvoice())[0] === 1 && !isset($conf->global->CASHDESK_NO_DECREASE_STOCK1), 'Failed attempt creation never overrides stock');
+	$settings['TAKEPOSGUARD_ENABLE'] = 0; $h = new InterceptionHook();
+	checkHook(invoke($h, new InterceptionInvoice())[0] === 0 && !isset($conf->global->CASHDESK_NO_DECREASE_STOCK1), 'Disabled module never changes stock policy');
 	echo $checks." interception checks passed (doubles, no native payments).\n";
 } catch (Throwable $e) { fwrite(STDERR, 'FAILED: '.$e->getMessage()."\n"); exit(1); }

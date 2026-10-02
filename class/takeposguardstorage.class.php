@@ -66,6 +66,18 @@ class TakeposguardStorage
 			.' WHERE entity = '.$this->entity.' AND operation_token = '.$this->quote($token));
 	}
 
+	/** @return object|null|false Committed initial validation evidence, never PROCESSING */
+	public function fetchSuccessfulValidation($invoiceId)
+	{
+		$this->error = '';
+		if ((int) $invoiceId < 1) {
+			return $this->fail('TakeposguardInvalidIdentity');
+		}
+		return $this->fetchOne('SELECT rowid FROM '.MAIN_DB_PREFIX.'takeposguard_payment_attempt'
+			.$this->scope($invoiceId)." AND status = 'SUCCESS' AND invoice_status_before = 0"
+			.' AND invoice_status_after IN (1, 2) AND date_completed IS NOT NULL ORDER BY rowid DESC');
+	}
+
 	/** @return object|null|false Lock metadata; does not acquire or recover a lock */
 	public function fetchInvoiceLock($invoiceId)
 	{

@@ -57,6 +57,7 @@ class StorageFixtureInvoice extends CommonInvoice
 		$this->entity = (int) $row->entity;
 		$this->status = (int) $row->fk_statut;
 		$this->total_ttc = $row->total_ttc;
+		$this->type = isset($row->type) ? (int) $row->type : 0;
 		$this->module_source = $row->module_source;
 	}
 	public function fetch($id, $ref = '', $ref_ext = '', $ref_int = '')
@@ -168,6 +169,7 @@ try {
 	storageCheck($storage->createProcessing(1, strtoupper($a), 1, $metadata) > 0, 'Create attempt');
 	$row = $storage->fetchAttempt(1, $a);
 	storageCheck($row->status === 'PROCESSING' && (float) $row->remain_before === 100.0 && $row->remain_after === null, 'Initial authoritative snapshot');
+	storageCheck($storage->fetchSuccessfulValidation(1) === null, 'Processing is not initial validation evidence');
 	storageCheck(abs((float) $row->requested_amount - 40.12345678) < 0.00000001 && $row->actual_amount === null, 'Requested amount separate from result');
 	storageCheck(mb_strlen($row->user_agent, 'UTF-8') === 255, 'UTF-8 bounded metadata');
 	storageCheck($storage->createProcessing(1, $a, 1) === false, 'Duplicate token rejected');
@@ -188,6 +190,7 @@ try {
 	storageCheck(!$storage->completeAttempt(1, $a, 'SUCCESS', array('fk_payment' => 11)), 'Foreign payment rejected');
 	storageCheck(!$storage->completeAttempt(1, $a, 'PROCESSING', array()), 'Invalid transition rejected');
 	storageCheck($storage->completeAttempt(1, $a, 'SUCCESS', array('actual_amount' => '999', 'fk_payment' => 10)), 'Store confirmed outcome');
+	storageCheck($storage->fetchSuccessfulValidation(1) !== null, 'Committed draft-to-validated success is evidence');
 	$row = $storage->fetchAttempt(1, $a);
 	storageCheck((float) $row->remain_after === 60.0 && (int) $row->fk_payment === 10 && $row->date_completed !== null, 'Persistent native balance');
 	storageCheck((float) $row->actual_amount === 40.0, 'Actual amount comes from database, not caller');
@@ -197,6 +200,21 @@ try {
 	storageCheck((float) $row->remain_before === 60.0 && (int) $row->payment_count_before === 1 && (int) $row->last_payment_before === 10, 'Payment baseline');
 	storageCheck($storage->completeAttempt(1, $b, 'FAILED', array('error_code' => 'NativeFailure', 'error_message' => "can't pay\n")), 'Failure persisted');
 	storageCheck($storage->fetchAttempt(1, $b)->error_message === "can't pay", 'SQL escaping and control character removal');
+	storageCheck($storage->fetchSuccessfulValidation(2) === null, 'Partial-only and uncompleted attempts do not prove initial validation');
+	$conf->modules = array('stock' => 1, 'productbatch' => 1);
+	$_GET = array('takeposguard_token' => '12345678-1234-4234-8234-123456789af1', 'pay' => 'LIQ', 'amount' => '60');
+	$partialHook = new StorageFixtureHook($db);
+	$partialFixture = new StorageFixtureInvoice($db, (object) array('rowid' => 1, 'entity' => 1, 'fk_statut' => 0, 'total_ttc' => 100, 'module_source' => 'takepos'));
+	$action = 'valid';
+	storageCheck($partialHook->doActions(array('context' => 'takeposinvoice'), $partialFixture, $action, null) === 0
+		&& getDolGlobalString('CASHDESK_NO_DECREASE_STOCK1') === '1', 'New partial-payment token accepted with real initial validation evidence and stock override');
+	$partialAttempt = $storage->fetchAttempt(1, $_GET['takeposguard_token']);
+	storageCheck($partialAttempt && (float) $partialAttempt->remain_before === 60.0
+		&& (int) $partialAttempt->invoice_status_before === 1, 'Partial snapshot uses authoritative remaining balance');
+	$partialHook->completeTakePosInvoiceHeader(array('context' => 'takeposinvoice'), $partialFixture, $action, null);
+	storageCheck(!property_exists($conf->global, 'CASHDESK_NO_DECREASE_STOCK1') && $partialHook->releaseFixtureLock(), 'Post-native fixture header restores missing constant exactly');
+	$_GET = array();
+	$conf->modules = array();
 	storageCheck($storage->createProcessing(2, $c, 1) > 0 && $storage->completeAttempt(2, $c, 'BLOCKED', array()), 'Blocked outcome persisted');
 	storageCheck($storage->createProcessing(5, $d, 1, array('requested_amount' => '-10')) > 0, 'Negative credit-note balance');
 	fixtureSql('INSERT INTO tpg_test_societe_remise_except VALUES (5,2,20,20)');
@@ -206,6 +224,7 @@ try {
 	$other = new StorageFixtureRepository($db);
 	storageCheck($other->fetchAttempt(1, $a) === null && !$other->completeAttempt(1, $a, 'FAILED', array()), 'Cross-entity access denied');
 	storageCheck($other->createProcessing(3, $a, 1) > 0, 'Token reusable in another entity');
+	storageCheck($other->fetchSuccessfulValidation(1) === null, 'Validation evidence cannot cross entities');
 	storageCheck($storage->fetchAttempt(1, $a)->status === 'SUCCESS', 'Original entity scope remains fixed');
 	storageCheck((int) $storage->fetchTokenOwner($a)->fk_invoice === 1
 		&& $storage->fetchTokenOwner($a)->status === 'SUCCESS', 'Token lookup finds invoice binding and terminal status');
@@ -227,6 +246,7 @@ try {
 		&& $storage->error === 'TakeposguardSnapshotFailed', 'Native calculation failure blocks persistence');
 	fixtureSql('DROP TEMPORARY TABLE tpg_test_takeposguard_payment_attempt');
 	storageCheck($storage->fetchTokenOwner($a) === false, 'Token SQL failure remains fail closed');
+	storageCheck($storage->fetchSuccessfulValidation(1) === false, 'Evidence SQL failure distinct from absence');
 	storageCheck($storage->fetchAttempt(1, $a) === false && $storage->error === 'TakeposguardStorageReadFailed', 'SQL read failure remains distinct from absence');
 	echo $checks." storage/schema checks passed on ".$db->type." (temporary tables only).\n";
 } catch (Throwable $error) {

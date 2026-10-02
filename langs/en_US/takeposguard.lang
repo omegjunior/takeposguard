@@ -27,3 +27,7 @@ TakeposguardPaymentBusy=A payment is already being processed for this invoice. P
 TakeposguardPaymentRecoveryRequired=An interrupted payment must be reconciled before this invoice can receive another payment. Contact your administrator.
 TakeposguardPaymentTechnicalFailure=Payment protection could not authorize this request. No native payment was started. Contact your administrator.
 TakeposguardPaymentTokenUsed=This payment attempt token has already been used. Check the invoice before starting a new payment attempt.
+
+# Partial payments and stock
+TakeposguardPaymentInvoiceNotPayable=This invoice is settled, closed, abandoned or has no payable balance. No payment was started.
+TakeposguardPaymentStockUnproven=The module history cannot confirm the initial validation of this invoice. Payment was blocked to prevent another stock movement. Contact your administrator.
