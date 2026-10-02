@@ -164,7 +164,7 @@ L’enveloppe empêche les doubles appels avant le lancement du prestataire et a
 
 Le module ne transmet pas de clé d’idempotence aux API Stripe/SumUp et ne garantit pas l’unicité du débit externe, notamment entre onglets, appareils ou après perte du stockage navigateur. Ces garanties exigent une intégration côté prestataire. Vérifier le paiement chez le prestataire avant toute réconciliation manuelle ; ne pas effacer un jeton incertain pour relancer un débit.
 
-### Vérification
+### Vérification 2
 
 `node --check js/takeposguard.js` et `node test/javascript.cjs` : 37 contrôles avec doubles DOM/jQuery, sans dépendance supplémentaire. Ils couvrent les doubles appels, le paiement direct, le jQuery parent, les GET/POST, les URL exclues, le CSRF, le UUID cryptographique de repli, les jetons fournis, la facture provisoire, les réponses incertaines, le rejeu contrôlé, le rechargement, les résultats corrélés et les prestataires. Les en-têtes de l’étape 7 sont simulés dans ces tests.
 
