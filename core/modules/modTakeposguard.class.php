@@ -37,7 +37,7 @@ class modTakeposguard extends DolibarrModules
 		$this->version = '0.3.0';
 		$this->editor_name = 'Fred Omega Junior';
 		$this->const_name = 'MAIN_MODULE_TAKEPOSGUARD';
-		$this->picto = 'shield-alt';
+		$this->picto = 'fa-shield-alt';
 		$this->module_parts = array(
 			'triggers' => 0,
 			'js' => array('/takeposguard/js/takeposguard.js.php'),
