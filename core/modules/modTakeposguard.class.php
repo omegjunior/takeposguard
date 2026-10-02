@@ -34,7 +34,7 @@ class modTakeposguard extends DolibarrModules
 		$this->module_position = '90';
 		$this->name = 'Takeposguard';
 		$this->description = 'ModuleTakeposguardDesc';
-		$this->version = '0.7.0';
+		$this->version = '0.9.0';
 		$this->editor_name = 'Fred Omega Junior';
 		$this->const_name = 'MAIN_MODULE_TAKEPOSGUARD';
 		$this->picto = 'fa-shield-alt';
@@ -58,6 +58,7 @@ class modTakeposguard extends DolibarrModules
 			array('TAKEPOSGUARD_ENABLE', 'chaine', '0', 'Enable payment protection', 0, 'current', 0),
 			array('TAKEPOSGUARD_LOCK_TIMEOUT', 'chaine', '120', 'Lock lifetime in seconds', 0, 'current', 0),
 			array('TAKEPOSGUARD_HISTORY_DAYS', 'chaine', '90', 'Detailed history retention in days', 0, 'current', 0),
+			array('TAKEPOSGUARD_MAX_ATTEMPTS', 'chaine', '1000', 'Maximum durable attempts per invoice', 0, 'current', 0),
 			array('TAKEPOSGUARD_DEBUG_LOG', 'chaine', '0', 'Detailed diagnostic logging', 0, 'current', 0),
 			array('TAKEPOSGUARD_MISSING_TOKEN_POLICY', 'chaine', 'reject', 'Missing operation token policy', 0, 'current', 0),
 		);
@@ -66,7 +67,24 @@ class modTakeposguard extends DolibarrModules
 			array(50111701, 'TakeposguardReadAudit', 'r', 0, 'audit', 'read'),
 			array(50111702, 'TakeposguardMaintain', 'w', 0, 'maintenance', 'write'),
 		);
-		$this->menu = array();
+		$this->menu = array(
+			array('fk_menu' => '', 'type' => 'top', 'titre' => 'ModuleTakeposguardName', 'mainmenu' => 'takeposguard',
+				'leftmenu' => '', 'url' => '/takeposguard/takeposguardindex.php', 'langs' => 'takeposguard@takeposguard', 'position' => 100,
+				'enabled' => 'isModEnabled("takeposguard")', 'perms' => '$user->admin || $user->hasRight("takeposguard", "audit", "read") || $user->hasRight("takeposguard", "maintenance", "write")', 'target' => '', 'user' => 0),
+			array('fk_menu' => 'fk_mainmenu=takeposguard', 'type' => 'left', 'titre' => 'TakeposguardAudit', 'mainmenu' => 'takeposguard',
+				'leftmenu' => 'takeposguardaudit', 'url' => '/takeposguard/audit.php', 'langs' => 'takeposguard@takeposguard', 'position' => 101,
+				'enabled' => 'isModEnabled("takeposguard")', 'perms' => '$user->admin || $user->hasRight("takeposguard", "audit", "read")', 'target' => '', 'user' => 0),
+			array('fk_menu' => 'fk_mainmenu=takeposguard', 'type' => 'left', 'titre' => 'TakeposguardMaintenance', 'mainmenu' => 'takeposguard',
+				'leftmenu' => 'takeposguardmaintenance', 'url' => '/takeposguard/admin/maintenance.php', 'langs' => 'takeposguard@takeposguard', 'position' => 102,
+				'enabled' => 'isModEnabled("takeposguard")', 'perms' => '$user->admin || $user->hasRight("takeposguard", "maintenance", "write")', 'target' => '', 'user' => 0),
+		);
+		$this->cronjobs = array(
+			array('label' => 'TakeposguardScheduledPurge:takeposguard@takeposguard', 'jobtype' => 'method',
+				'class' => '/takeposguard/class/takeposguardmaintenance.class.php', 'objectname' => 'TakeposguardMaintenance',
+				'method' => 'doScheduledJob', 'parameters' => '', 'comment' => 'TakeposguardScheduledPurgeHelp',
+				'frequency' => 1, 'unitfrequency' => 86400, 'priority' => 50, 'status' => 0,
+				'test' => 'isModEnabled("takeposguard")'),
+		);
 	}
 
 	/** @return int Activation result */

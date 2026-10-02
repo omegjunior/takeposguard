@@ -1,5 +1,14 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.9.0
+
+- Étapes 8 et 9 regroupées : audit paginé avec filtres, jointures facture/utilisateur, jetons tronqués et droits distincts de maintenance.
+- Récupération administrative des propriétaires expirés après réconciliation, sans déplacement d’une session active ni libération forcée d’un état ambigu.
+- Purge des détails anciens confirmés par lots de 500, en conservant les jetons, résultats, soldes et preuves de validation ; exclusions des états récents/non résolus et des factures verrouillées.
+- Tâche CronJob native quotidienne facultative, désactivée par défaut et soumise au droit de maintenance.
+- Plafond configurable de tentatives persistantes par facture, contrôlé avant traitement natif sous verrou.
+- Menus, traductions, diagnostic et tests droits/échappement/MariaDB ; aucun fichier du cœur modifié.
+
 ## 0.7.0
 
 - Finalisation après commit/rollback au hook natif, à partir du statut, du solde et des paiements persistants ; résultat enregistré avant libération du verrou.

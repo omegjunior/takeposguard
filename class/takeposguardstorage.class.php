@@ -137,6 +137,15 @@ class TakeposguardStorage
 			|| !is_string($agent) || !preg_match('//u', $agent)) {
 			return $this->fail('TakeposguardInvalidMetadata');
 		}
+		// Called under the invoice lock by the guard: limit durable keys per invoice.
+		$limit = max(10, min(9999, getDolGlobalInt('TAKEPOSGUARD_MAX_ATTEMPTS', 1000)));
+		$count = $this->fetchOne('SELECT COUNT(*) AS total FROM '.MAIN_DB_PREFIX.'takeposguard_payment_attempt'.$this->scope($invoiceId));
+		if (!$count) {
+			return $this->fail('TakeposguardStorageReadFailed');
+		}
+		if ((int) $count->total >= $limit) {
+			return $this->fail('TakeposguardAttemptLimitReached');
+		}
 		$snapshot = $this->invoiceSnapshot($invoiceId);
 		if ($snapshot === false) {
 			return false;

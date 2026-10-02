@@ -138,7 +138,8 @@ try {
 	$user = new class {
 		public $id = 1;
 		public $socid = 0;
-		public function hasRight($module, $right) { return true; }
+		public $allowed = true;
+		public function hasRight($module, $right, $detail = '') { return $this->allowed; }
 	};
 	$_GET = array('takeposguard_token' => '12345678-1234-4234-8234-123456789afe', 'pay' => 'LIQ', 'amount' => '25');
 	$_SESSION['takeposterminal'] = 1;
@@ -315,11 +316,98 @@ try {
 	$orphan = new TakeposguardLock($db);
 	storageCheck($orphan->acquire(42, $recoverToken, 120) === 2 && $recovery->recover($orphan, 42)
 		&& $orphan->release(), 'Absent attempt permits safe expired owner replacement without native processing');
+	// Audit and administrative maintenance operate on the same temporary namespace.
+	require_once __DIR__.'/../class/takeposguardaudit.class.php';
+	require_once __DIR__.'/../class/takeposguardmaintenance.class.php';
+	fixtureSql('ALTER TABLE tpg_test_facture ADD ref varchar(128)');
+	fixtureSql('CREATE TEMPORARY TABLE tpg_test_user (rowid integer PRIMARY KEY, login varchar(128))');
+	fixtureSql("INSERT INTO tpg_test_user VALUES (1,'cashier')");
+	fixtureSql("UPDATE tpg_test_facture SET ref='<img src=x onerror=alert(1)>' WHERE rowid=20");
+	$audit = new TakeposguardAudit($db);
+	storageCheck(count($audit->attempts('', 0, 0, 2)) === 2 && count($audit->attempts('', 0, 2, 2)) === 2, 'Audit pagination bounded in SQL');
+	$audited = $audit->attempts('SUCCESS', 20);
+	storageCheck(count($audited) === 1 && $audited[0]->user_login === 'cashier' && $audited[0]->invoice_ref === '<img src=x onerror=alert(1)>', 'Audit joins invoice/user once with authoritative outcome');
+	storageCheck($audit->attempts("SUCCESS' OR 1=1", 0) === false, 'Audit rejects unsafe status filter');
+	storageCheck($audit->attempts('', 3) === array(), 'Audit never reads another entity invoice');
+	class MaintenanceFixtureRepository extends TakeposguardMaintenance {
+		protected function loadInvoice($id) {
+			$result = $this->db->query('SELECT * FROM '.MAIN_DB_PREFIX.'facture WHERE rowid='.((int) $id));
+			$row = $result ? $this->db->fetch_object($result) : false;
+			return $row ? new StorageFixtureInvoice($this->db, $row) : false;
+		}
+	}
+	$maintenance = new MaintenanceFixtureRepository($db);
+	$maintenanceToken = '12345678-1234-4234-8234-123456789af5';
+	fixtureSql("INSERT INTO tpg_test_facture VALUES (43,1,'takepos',0,100,0,'draft')");
+	$live = new TakeposguardLock($db);
+	storageCheck($live->acquire(43, $maintenanceToken, 120) === 1 && $storage->createProcessing(43, $maintenanceToken, 1), 'Maintenance live fixture');
+	storageCheck(!$maintenance->releaseExpired(43, $maintenanceToken), 'Maintenance does not release unexpired metadata');
+	fixtureSql("UPDATE tpg_test_takeposguard_invoice_lock SET expires_at='2020-01-01 00:00:00' WHERE entity=1 AND fk_invoice=43");
+	storageCheck(!$maintenance->releaseExpired(43, $maintenanceToken) && $live->isHeld(), 'Maintenance never displaces live ownership despite expiry');
+	$live->abandon();
+	storageCheck(!$maintenance->releaseExpired(43, $recoverToken), 'Stale form token cannot recover another owner');
+	$conf->global->TAKEPOSGUARD_ENABLE = 0;
+	storageCheck(!$maintenance->releaseExpired(43, $maintenanceToken), 'Disabled guard cannot safely reconcile native unguarded requests');
+	$conf->global->TAKEPOSGUARD_ENABLE = 1;
+	storageCheck($maintenance->releaseExpired(43, $maintenanceToken) && $storage->fetchInvoiceLock(43) === null
+		&& $storage->fetchAttempt(43, $maintenanceToken)->status === 'FAILED', 'Maintenance safely reconciles and releases expired no-effect request');
+	$ambiguousToken = sprintf('12345678-1234-4234-8234-%012x', 25);
+	storageCheck(!$maintenance->releaseExpired(25, $ambiguousToken) && $storage->fetchInvoiceLock(25) !== null, 'BLOCKED effects remain locked without forced release');
+	fixtureSql("UPDATE tpg_test_takeposguard_payment_attempt SET datec='2020-01-01 00:00:00', date_completed='2020-01-02 00:00:00', terminal='old', user_agent='old', error_message='old' WHERE entity=1 AND fk_invoice IN (20,22,25)");
+	fixtureSql("UPDATE tpg_test_takeposguard_payment_attempt SET datec='2020-01-01 00:00:00', user_agent='unresolved' WHERE entity=1 AND fk_invoice=2 AND status='PROCESSING'");
+	$initialToken = sprintf('12345678-1234-4234-8234-%012x', 20);
+	$failedToken = sprintf('12345678-1234-4234-8234-%012x', 22);
+	$lockedToken = sprintf('12345678-1234-4234-8234-%012x', 23);
+	$lockedHistory = new TakeposguardLock($db);
+	storageCheck($lockedHistory->acquire(23, $lockedToken, 120) === 1 && $lockedHistory->abandon(), 'Old confirmed result with retained lock');
+	fixtureSql("UPDATE tpg_test_takeposguard_payment_attempt SET datec='2020-01-01 00:00:00', date_completed='2020-01-02 00:00:00', terminal='locked' WHERE entity=1 AND fk_invoice=23");
+	$db->begin();
+	storageCheck($maintenance->purgeDetails(90) === false, 'Purge does not nest into a native transaction');
+	$db->rollback();
+	storageCheck($maintenance->purgeDetails(0) === false, 'Invalid retention never purges recent history');
+	storageCheck($maintenance->purgeDetails(90) === 2, 'Purge redacts only old confirmed unlocked outcomes');
+	storageCheck($storage->fetchAttempt(20, $initialToken)->user_agent === null && $storage->fetchAttempt(22, $failedToken)->error_message === null, 'Old sensitive details removed');
+	storageCheck($storage->fetchTokenOwner($initialToken)->status === 'SUCCESS' && $storage->fetchTokenOwner($failedToken)->status === 'FAILED'
+		&& $storage->fetchSuccessfulValidation(20) !== null, 'Purge preserves replay rejection and initial stock evidence');
+	storageCheck($storage->fetchAttempt(25, $ambiguousToken)->user_agent === 'old'
+		&& $storage->fetchAttempt(2, $c)->status === 'BLOCKED', 'Ambiguous outcomes never purged');
+	$unresolved = $db->fetch_object(fixtureSql("SELECT COUNT(*) AS total FROM tpg_test_takeposguard_payment_attempt WHERE entity=1 AND fk_invoice=2 AND status='PROCESSING' AND user_agent='unresolved'"));
+	storageCheck((int) $unresolved->total > 0, 'Old unresolved processing details retained');
+	storageCheck($storage->fetchAttempt(40, '12345678-1234-4234-8234-123456789af2')->payment_code === 'LIQ', 'Recent outcome details preserved');
+	storageCheck($maintenance->purgeDetails(90) === 0, 'Repeated detail purge is idempotent');
+	storageCheck($storage->fetchAttempt(23, $lockedToken)->terminal === 'locked', 'Purge excludes old confirmed outcomes on locked invoices');
+	fixtureSql("UPDATE tpg_test_takeposguard_invoice_lock SET expires_at='2020-01-01 00:00:00' WHERE entity=1 AND fk_invoice=23");
+	storageCheck($maintenance->releaseExpired(23, $lockedToken) && $maintenance->purgeDetails(90) === 1, 'Confirmed expired owner released before old detail redaction');
+	$conf->global->TAKEPOSGUARD_MAX_ATTEMPTS = 10;
+	fixtureSql("INSERT INTO tpg_test_facture VALUES (44,1,'takepos',0,100,0,'limited')");
+	for ($n = 0; $n < 10; $n++) {
+		storageCheck($storage->createProcessing(44, sprintf('12345678-1234-4234-8234-%012x', 500 + $n), 1) > 0, 'Invoice limit baseline');
+	}
+	storageCheck($storage->createProcessing(44, sprintf('12345678-1234-4234-8234-%012x', 510), 1) === false
+		&& $storage->error === 'TakeposguardAttemptLimitReached', 'Bounded persistent keys prevent unbounded attempts on an invoice');
+	$conf->global->TAKEPOSGUARD_MAX_ATTEMPTS = 1000;
+	$batch = array();
+	for ($n = 0; $n < 501; $n++) {
+		$batch[] = "(1,44,'".sprintf('12345678-1234-4234-8234-%012x', 10000 + $n)."',1,100,0,'FAILED','2020-01-01 00:00:00','2020-01-02 00:00:00','batch')";
+	}
+	fixtureSql('INSERT INTO tpg_test_takeposguard_payment_attempt(entity,fk_invoice,operation_token,fk_user,remain_before,invoice_status_before,status,datec,date_completed,terminal) VALUES '.implode(',', $batch));
+	storageCheck($maintenance->purgeDetails(90) === 500 && $maintenance->purgeDetails(90) === 1, 'Cleanup bounded to 500 outcomes per invocation');
+	$conf->modules['takeposguard'] = 1;
+	storageCheck($maintenance->doScheduledJob() === 0, 'Native scheduled cleanup entrypoint succeeds with maintenance rights');
+	$user->allowed = false;
+	storageCheck($maintenance->doScheduledJob() === 1, 'Scheduled cleanup refuses an unauthorized execution user');
+	$user->allowed = true;
+	unset($conf->modules['takeposguard']);
+	storageCheck($maintenance->doScheduledJob() === 1, 'Scheduled cleanup is inert when module disabled');
 	$conf->entity = 2;
 	$other = new StorageFixtureRepository($db);
 	storageCheck($other->fetchAttempt(1, $a) === null && !$other->completeAttempt(1, $a, 'FAILED', array()), 'Cross-entity access denied');
 	storageCheck($other->createProcessing(3, $a, 1) > 0, 'Token reusable in another entity');
 	storageCheck($other->fetchSuccessfulValidation(1) === null, 'Validation evidence cannot cross entities');
+	$otherAudit = new TakeposguardAudit($db);
+	storageCheck(count($otherAudit->attempts()) === 1 && $otherAudit->attempts()[0]->fk_invoice == 3, 'Audit scoped to current entity');
+	$otherMaintenance = new MaintenanceFixtureRepository($db);
+	storageCheck(!$otherMaintenance->releaseExpired(25, $ambiguousToken) && $otherMaintenance->purgeDetails(90) === 0, 'Maintenance cannot release or redact another entity');
 	storageCheck($storage->fetchAttempt(1, $a)->status === 'SUCCESS', 'Original entity scope remains fixed');
 	storageCheck((int) $storage->fetchTokenOwner($a)->fk_invoice === 1
 		&& $storage->fetchTokenOwner($a)->status === 'SUCCESS', 'Token lookup finds invoice binding and terminal status');

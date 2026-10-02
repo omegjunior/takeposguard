@@ -2,9 +2,9 @@
 
 Module externe indépendant installé dans `htdocs/custom/takeposguard`, sans modification du cœur Dolibarr.
 
-## État de la version 0.7.0
+## État de la version 0.9.0
 
-Cette version implémente les points 1 à 7 : configuration, stockage, verrou exclusif, interception serveur, protection du stock lors des paiements partiels, protection JavaScript, finalisation et récupération. Les résultats confirmés en base deviennent `SUCCESS` ou `FAILED` après la transaction native ; une situation ambiguë devient `BLOCKED`. La protection reste à valider sur une instance de recette avant production : audit, maintenance et recette HTTP complète seront traités aux étapes suivantes. L’option désactivée conserve l’action native. Aucun trigger n’est ajouté.
+Cette version implémente les points 1 à 9 : configuration, stockage, verrou exclusif, interception serveur, protection du stock lors des paiements partiels, protection JavaScript, finalisation, récupération, audit et maintenance. Les résultats confirmés en base deviennent `SUCCESS` ou `FAILED` après la transaction native ; une situation ambiguë devient `BLOCKED`. La protection reste à valider sur une instance de recette avant production : la recette HTTP complète reste à exécuter à l’étape 10. L’option désactivée conserve l’action native. Aucun trigger n’est ajouté.
 
 ## Installation
 
@@ -24,6 +24,7 @@ Pour une installation déjà activée en 0.1.0, désactiver puis réactiver le m
 | `TAKEPOSGUARD_ENABLE` | `0` | `0` ou `1` |
 | `TAKEPOSGUARD_LOCK_TIMEOUT` | `120` | 10 à 3600 secondes |
 | `TAKEPOSGUARD_HISTORY_DAYS` | `90` | 1 à 3650 jours |
+| `TAKEPOSGUARD_MAX_ATTEMPTS` | `1000` | 10 à 9999 jetons par facture |
 | `TAKEPOSGUARD_DEBUG_LOG` | `0` | `0` ou `1` |
 | `TAKEPOSGUARD_MISSING_TOKEN_POLICY` | `reject` | Refus uniquement |
 
@@ -35,7 +36,7 @@ Les écritures utilisent les API natives, une transaction et l'entité courante.
 
 Numéro local : `501117`. Droits : `50111701` (`audit/read`) et `50111702` (`maintenance/write`). Ils ne donnent aucun droit de paiement et ne conditionnent pas la protection serveur. La configuration reste réservée aux administrateurs.
 
-Les identifiants ont été contrôlés dans les descripteurs locaux et en lecture seule dans `rights_def`. Cela ne constitue pas une réservation mondiale : vérifier les collisions sur chaque instance avant installation. Les pages d'audit et de maintenance viendront ultérieurement.
+Les identifiants ont été contrôlés dans les descripteurs locaux et en lecture seule dans `rights_def`. Cela ne constitue pas une réservation mondiale : vérifier les collisions sur chaque instance avant installation. Les pages d’audit et de maintenance sont maintenant disponibles dans le menu du module et depuis sa configuration.
 
 ## Vérification
 
@@ -45,7 +46,7 @@ Pour le stockage, exécuter `php test/storage.php --mysql` depuis le dossier du 
 
 `php test/sql_portability.php` vérifie la conversion des scripts par le pilote PostgreSQL Dolibarr, sans connexion PostgreSQL. Ce contrôle ne remplace pas un test d'installation et d'exécution sur ce moteur.
 
-Résultats exécutés localement : 126 contrôles de schéma/stockage sur MariaDB via le pilote `mysqli`, 18 cas de configuration et contrôles du descripteur, conversion de neuf instructions SQL par le pilote PostgreSQL. L'activation réelle dans l'interface n'a pas été exécutée.
+Résultats exécutés localement : 166 contrôles de schéma/stockage sur MariaDB via le pilote `mysqli`, 22 cas de configuration et contrôles du descripteur, conversion de neuf instructions SQL par le pilote PostgreSQL. L'activation réelle dans l'interface n'a pas été exécutée.
 
 Les tests de concurrence du verrou sont décrits ci-dessous. Les tests de paiement et stock après interception appartiennent aux étapes suivantes. Cette version ne doit pas être utilisée comme protection en production.
 
@@ -63,7 +64,7 @@ L'activation charge les fichiers `sql/llx_takeposguard*.sql` et leurs clés via 
 
 La bibliothèque n'ouvre ni ne termine de transaction. Le code appelant devra vérifier les droits et détenir le verrou exclusif avant création/finalisation ; l’interception applique ces conditions avant la création ; la finalisation applique également ces conditions. Le statut `SUCCESS` n'est pas déduit automatiquement par la couche de stockage. Les modes et montants demandés sont des informations d'audit, sans pouvoir d'autoriser un paiement.
 
-IP et user-agent sont facultatifs, validés et limités ; les messages d'erreur doivent être techniques et sans données sensibles. La bibliothèque n'écrit aucun log contenant les requêtes ou données de paiement. Les index couvrent la facture/date, l'état/date, la date de finalisation et l'expiration. Les références métier n'ont pas de suppression en cascade, pour préserver l'audit. Aucun nettoyage automatique ni limite de tentatives n'est activé à ce stade ; ces contrôles viendront avec l'interception et la maintenance.
+IP et user-agent sont facultatifs, validés et limités ; les messages d'erreur doivent être techniques et sans données sensibles. La bibliothèque n'écrit aucun log contenant les requêtes ou données de paiement. Les index couvrent la facture/date, l'état/date, la date de finalisation et l'expiration. Les références métier n'ont pas de suppression en cascade, pour préserver l'audit. La maintenance permet un nettoyage limité des détails anciens, avec une tâche native facultative désactivée par défaut. Une limite de tentatives par facture borne les jetons persistants.
 
 ## Verrou exclusif par facture
 
@@ -132,7 +133,7 @@ Sans gestion des lots, TakePOS ne déstocke que dans sa branche de validation du
 
 La surcharge exige une preuve en base, dans l’entité et pour la facture : une tentative `SUCCESS`, avec statut initial brouillon, statut final validé/payé et date de finalisation renseignée. Une tentative `PROCESSING`, `FAILED`, `BLOCKED` ou un paiement partiel réussi sur une facture déjà validée ne suffit pas. L’erreur SQL bloque également la requête. Le réglage natif qui désactive déjà le déstockage est respecté sans demander cette preuve.
 
-**Factures anciennes et historique :** en mode lots avec déstockage TakePOS actif, une facture validée sans preuve de validation initiale par le module est refusée. Ni un paiement existant ni la présence isolée d’un mouvement ne prouvent que toutes les lignes ont été traitées. Le module ne supprime aucun mouvement et ne tente pas de réparer des historiques modifiés hors de son contrôle. Une procédure de réconciliation pour les factures anciennes reste à définir ; ne pas fabriquer de lignes `SUCCESS`. La maintenance future devra conserver la preuve initiale tant qu’une facture peut recevoir un paiement partiel.
+**Factures anciennes et historique :** en mode lots avec déstockage TakePOS actif, une facture validée sans preuve de validation initiale par le module est refusée. Ni un paiement existant ni la présence isolée d’un mouvement ne prouvent que toutes les lignes ont été traitées. Le module ne supprime aucun mouvement et ne tente pas de réparer des historiques modifiés hors de son contrôle. Une procédure de réconciliation pour les factures anciennes reste à définir ; ne pas fabriquer de lignes `SUCCESS`. La maintenance conserve cette preuve initiale, y compris après purge des détails.
 
 Le hook `completeTakePosInvoiceHeader`, exécuté après le commit/rollback natif dans le cœur local 22.0.5 inspecté, restaure la valeur d’origine pour la facture protégée. Une sortie anticipée utilise un callback shutdown qui restaure seulement cette configuration en mémoire, y compris si la propriété était absente ou `null`. Le callback de finalisation ne travaille que si la connexion est encore ouverte, la transaction terminée et le verrou détenu. Il ne déduit jamais un succès de la seule fin de requête. Aucune constante persistante ni configuration d’une autre requête n’est modifiée.
 
@@ -180,7 +181,7 @@ Le résultat persistant et le reste après traitement sont enregistrés avant la
 
 **Ordre shutdown :** `main.inc.php` enregistre `dol_shutdown` avant les callbacks des modules. Cette fonction ferme la connexion native et une transaction ouverte est alors annulée par le moteur. Le callback du module restaure la configuration locale du stock, mais ne tente pas de rouvrir la connexion ni de confirmer un résultat sur une session fermée. L’historique et le propriétaire restent présents jusqu’à récupération après expiration. Un processus qui détient encore le verrou consultatif ne peut jamais être remplacé, même si le délai est dépassé.
 
-Après expiration, l’interception ou le service de récupération reprend le verrou consultatif, constate les effets de l’ancien propriétaire et finalise son historique. Seuls `SUCCESS` et `FAILED` permettent de remplacer le propriétaire expiré ; un verrou acquis avant l’insertion de toute tentative est également récupérable. `BLOCKED` interdit la reprise automatique. Les jetons anciens restent inutilisables pour exécuter un paiement. Ne pas supprimer l’historique ou le verrou pour forcer une reprise ambiguë : vérifier facture, paiements, banque, stock et prestataire ; la maintenance administrative viendra à l’étape suivante.
+Après expiration, l’interception ou le service de récupération reprend le verrou consultatif, constate les effets de l’ancien propriétaire et finalise son historique. Seuls `SUCCESS` et `FAILED` permettent de remplacer le propriétaire expiré ; un verrou acquis avant l’insertion de toute tentative est également récupérable. `BLOCKED` interdit la reprise automatique. Les jetons anciens restent inutilisables pour exécuter un paiement. Ne pas supprimer l’historique ou le verrou pour forcer une reprise ambiguë : vérifier facture, paiements, banque, stock et prestataire ; la page de maintenance permet uniquement une récupération confirmée, sans libération forcée.
 
 `ajax/attempt.php` accepte uniquement un POST authentifié `action=recover`, avec le jeton CSRF natif et le UUID de tentative. Il vérifie l’activation, les droits TakePOS/création de facture, l’entité et l’auteur de la tentative ; un administrateur ou un utilisateur avec `maintenance/write` peut consulter/récupérer celle d’un autre utilisateur. Aucun droit d’audit n’est requis au caissier pour sa propre tentative. Aucun identifiant de facture fourni par le navigateur n’est utilisé. La réponse privée ne contient que le UUID et un statut. `UNKNOWN` ne permet pas une nouvelle tentative : la requête initiale pourrait être retardée avant même son arrivée au serveur.
 
@@ -189,11 +190,33 @@ Une récupération ne débite jamais Stripe/SumUp. `FAILED` côté Dolibarr lais
 ### Tests exécutés et recette restante
 
 - `php test/finalization.php` : 23 décisions et refus, notamment paiement partiel/avoir, effets ambigus, session fermée, transaction ouverte, propriété perdue et erreurs de stockage.
-- `php test/storage.php --mysql` : 126 contrôles sur tables temporaires, avec commit, rollback, finalisation au hook, attribution du paiement, expiration, résultat ambigu, récupération par statut et droits auteur/maintenance.
+- `php test/storage.php --mysql` : 166 contrôles sur tables temporaires, avec commit, rollback, finalisation au hook, attribution du paiement, expiration, résultat ambigu, récupération par statut et droits auteur/maintenance.
 - `php test/locks.php --mysql` : 53 contrôles avec processus réellement concurrents et fermeture PHP après commit ou avec transaction ouverte, dans un préfixe de tables de test aléatoire. Le traitement de validation est simulé par SQL dans ces scénarios d’interruption ; aucun paiement/stock Dolibarr réel n’est exécuté.
 - `node test/javascript.cjs` : 45 contrôles, notamment récupération explicite après rechargement sans rejeu, POST CSRF, jeton corrélé et maintien du blocage prestataire après `FAILED` natif.
 
 Sur une instance de recette, activer la protection et exécuter deux appels HTTP parallèles à `invoice.php?action=valid` pour la même facture, avec jeton identique puis distinct. Vérifier une seule validation/paiement/écriture bancaire/série de mouvements, puis rejouer le premier jeton et payer volontairement le solde avec un autre. Répéter sans lots et avec lots. Provoquer une erreur stock/banque/paiement et vérifier le rollback natif, l’historique `FAILED` et le verrou libéré ; interrompre avant/après commit et vérifier la récupération après expiration. Tester l’option désactivée et deux entités. Vérifier également le POST de récupération avec CSRF absent/invalide et utilisateur tiers. Aucun test HTTP authentifié, prestataire réel ni serveur PostgreSQL n’a été exécuté localement ; ces essais ne sont pas remplacés par les fixtures.
+
+## Audit et maintenance (étapes 8 et 9)
+
+Après mise à jour, désactiver puis réactiver **le module** depuis Configuration > Modules/Applications pour installer les menus, la nouvelle constante et la tâche planifiée. Faire cette opération hors encaissement. La constante `TAKEPOSGUARD_ENABLE` et les historiques sont conservés ; aucun changement de schéma SQL n’est requis pour passer de 0.7 à 0.9.
+
+Le menu TakePOS Payment Guard ouvre `audit.php` pour un utilisateur avec `audit/read`, ou la maintenance si son seul droit est `maintenance/write`. Les administrateurs ont accès aux deux. Les utilisateurs externes sont refusés. Ces droits restent distincts des droits de paiement : un caissier peut bénéficier de la protection sans lire l’historique général ni administrer les verrous. Les contrôles sont exécutés sur chaque page, même lors d’un accès direct par URL.
+
+L’audit affiche date, facture, terminal, utilisateur, mode, montant demandé et constaté, statut traduit, UUID tronqué, soldes avant/après et code/message d’erreur. Les filtres portent sur le statut et l’identifiant de facture ; la pagination est limitée à 50 lignes par page, avec requête SQL bornée. Les références de facture et comptes utilisateur sont chargés par jointure ; toutes les valeurs affichées sont échappées. Un montant demandé est une information d’audit, sans preuve de paiement. Les montants utilisent la devise principale de la facture.
+
+`admin/maintenance.php` liste les verrous de l’entité, leur date d’expiration et l’état de la tentative. « Réconcilier et libérer » exige un POST avec CSRF et le propriétaire exact affiché. Une requête encore active, un propriétaire changé, un verrou non expiré, un résultat `BLOCKED` ou une lecture impossible ne peut pas être forcé. Après expiration et seulement en absence de propriétaire actif, les effets sont réconciliés avant suppression du verrou. Un verrou sans tentative est récupérable parce que l’action native n’avait pas été autorisée. La protection doit être activée pour effectuer cette récupération : sinon les paiements natifs concurrents ne respecteraient pas le verrou. Les paiements externes doivent être vérifiés séparément. Les accès n’exécutent aucun paiement ni mouvement de stock.
+
+« Purger les détails anciens » traite au maximum 500 tentatives par appel, selon `TAKEPOSGUARD_HISTORY_DAYS`. Seuls les résultats `SUCCESS`/`FAILED` dont la création et la finalisation sont anciennes sont éligibles. Les factures ayant encore un verrou sont exclues, ainsi que toutes les tentatives récentes, `PROCESSING` et `BLOCKED`. Le terminal, le mode, les montants demandé/constaté, l’IP, l’agent navigateur et le message d’erreur sont effacés. Les champs techniques minimaux, notamment UUID, entité/facture/auteur, résultat, dates, soldes et preuves de validation initiale, **restent persistants**. Il s’agit donc d’une purge de détails, pas d’une suppression de lignes : effacer la clé d’idempotence permettrait de rejouer une ancienne requête. La preuve conservée permet les paiements partiels avec lots. Répéter la commande pour un historique dépassant 500 résultats.
+
+Une tâche **CronJob Dolibarr native**, quotidienne et désactivée par défaut, appelle le même nettoyage borné. Activer le module Tâches planifiées, choisir un compte interne administrateur ou disposant de `maintenance/write`, puis activer la tâche « Purger les détails anciens TakePOS Payment Guard ». Chaque exécution traite uniquement l’entité de la tâche. Elle ne libère aucun verrou et ne résout aucune ambiguïté ; les reprises expirées sont traitées par l’interception, la commande caissier ou la maintenance contrôlée. Sans module Cron actif, le nettoyage manuel reste disponible. Ne pas appeler une méthode de purge par une commande SQL générale.
+
+`TAKEPOSGUARD_MAX_ATTEMPTS` limite les jetons persistants par facture, défaut 1000 (10 à 9999). L’interception vérifie ce plafond sous le verrou avant d’autoriser le traitement natif ; une erreur de lecture bloque aussi l’insertion. Les jetons purgés de leurs détails restent comptés. Le réglage ne s’applique pas quand la protection est désactivée. Il ne constitue pas un quota global contre un utilisateur autorisé à créer un grand nombre de factures. Une augmentation se fait dans la configuration, après examen de la facture et de l’historique ; ne pas effacer des jetons pour contourner le plafond.
+
+### Vérifications exécutées
+
+`php test/audit.php` : 10 contrôles des droits distincts, des comptes externes/non authentifiés, de la navigation et de l’échappement. `php test/storage.php --mysql` : 166 contrôles, dont audit paginé, filtre invalide, récupération expirée, verrou actif malgré expiration, propriétaire modifié, résultat ambigu, nettoyage sélectif, conservation des clés et du stock, multientité, plafond de tentatives, lots de 500 et droits de la tâche planifiée. Les contrôles de configuration comprennent 22 cas et le statut désactivé de la tâche. Les tests de concurrence, de finalisation, de JavaScript, de stock natif avec doubles et de conversion SQL PostgreSQL restent exécutés.
+
+La recette HTTP authentifiée doit encore vérifier l’activation/réactivation des menus et de la tâche, les deux droits séparément, l’accès direct interdit, les POST avec CSRF invalide, la pagination, les références contenant du HTML, les confirmations et refus de maintenance, et l’exécution d’une tâche dans deux entités. Aucun navigateur authentifié ni serveur PostgreSQL n’a été utilisé pour cette étape. L’étape 10 reste la recette complète de paiement/banque/stock et la vérification de compatibilité ; le module reste à qualifier avant production.
 
 ## Licence
 

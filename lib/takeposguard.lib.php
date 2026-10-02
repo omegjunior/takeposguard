@@ -105,5 +105,8 @@ function takeposguardValidateSetting($type, $value)
 	if ($type === 'seconds') {
 		return (int) $value >= 10 && (int) $value <= 3600;
 	}
+	if ($type === 'attempts') {
+		return (int) $value >= 10 && (int) $value <= 9999;
+	}
 	return $type === 'days' && (int) $value >= 1 && (int) $value <= 3650;
 }

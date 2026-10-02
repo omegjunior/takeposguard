@@ -68,6 +68,7 @@ $settings = array(
 	'TAKEPOSGUARD_ENABLE' => array('boolean', '0', 'TakeposguardEnable'),
 	'TAKEPOSGUARD_LOCK_TIMEOUT' => array('seconds', '120', 'TakeposguardLockTimeout'),
 	'TAKEPOSGUARD_HISTORY_DAYS' => array('days', '90', 'TakeposguardHistoryDays'),
+	'TAKEPOSGUARD_MAX_ATTEMPTS' => array('attempts', '1000', 'TakeposguardMaxAttempts'),
 	'TAKEPOSGUARD_DEBUG_LOG' => array('boolean', '0', 'TakeposguardDebugLog'),
 	'TAKEPOSGUARD_MISSING_TOKEN_POLICY' => array('policy', 'reject', 'TakeposguardMissingTokenPolicy'),
 );
@@ -117,6 +118,8 @@ if ($action === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 llxHeader('', $langs->trans('TakeposguardSetup'));
 print load_fiche_titre($langs->trans('TakeposguardSetup'), '<a href="'.DOL_URL_ROOT.'/admin/modules.php">'.$langs->trans('BackToModuleList').'</a>', 'title_setup');
 print dol_get_fiche_head(takeposguardAdminPrepareHead(), 'settings', $langs->trans('ModuleTakeposguardName'), -1, 'shield-alt');
+print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/audit.php', 1)).'">'.dol_escape_htmltag($langs->trans('TakeposguardAudit')).'</a>';
+print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/admin/maintenance.php', 1)).'">'.dol_escape_htmltag($langs->trans('TakeposguardMaintenance')).'</a>';
 print '<div class="warning">'.$langs->trans('TakeposguardConfigurationOnly').'</div>';
 print '<form method="post" action="'.dol_buildpath('/takeposguard/admin/setup.php', 1).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
@@ -135,7 +138,8 @@ foreach ($settings as $name => $setting) {
 		print '<select id="'.$name.'" name="'.$name.'"><option value="reject">'.$langs->trans('TakeposguardRejectMissingToken').'</option></select>';
 	} else {
 		$min = ($setting[0] === 'seconds' ? 10 : 1);
-		$max = ($setting[0] === 'seconds' ? 3600 : 3650);
+		$max = ($setting[0] === 'seconds' ? 3600 : ($setting[0] === 'attempts' ? 9999 : 3650));
+		if ($setting[0] === 'attempts') { $min = 10; }
 		print '<input type="number" id="'.$name.'" name="'.$name.'" min="'.$min.'" max="'.$max.'" step="1" required value="'.dol_escape_htmltag($values[$name]).'">';
 	}
 	print '</td></tr>';

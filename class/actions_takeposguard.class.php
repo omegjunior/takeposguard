@@ -120,7 +120,8 @@ class ActionsTakeposguard
 			$persisting = true;
 			if ($storage->createProcessing((int) $object->id, $token, (int) $user->id, $metadata) === false) {
 				$lock->release();
-				return $this->block('TakeposguardPaymentTechnicalFailure', $object);
+				return $this->block($storage->error === 'TakeposguardAttemptLimitReached'
+					? 'TakeposguardAttemptLimitReached' : 'TakeposguardPaymentTechnicalFailure', $object);
 			}
 			if ($suppressStock && !$policy->suppressStock($terminal)) {
 				$lock->abandon();

@@ -52,6 +52,7 @@ class InterceptionLock
 }
 class InterceptionStorage
 {
+	public $error = '';
 	public $previous = null;
 	public $validation = true;
 	public $validationReads = 0;
@@ -115,6 +116,9 @@ try {
 	checkHook(invoke($h, $i)[0] === 1 && !$h->storage->creates && $h->lock->released === 1, 'Native reload failure blocks');
 	$h = new InterceptionHook(); $h->storage->insertResult = false;
 	checkHook(invoke($h, new InterceptionInvoice())[0] === 1 && $h->lock->released === 1, 'Insert failure blocks native action');
+	$h = new InterceptionHook(); $h->storage->insertResult = false; $h->storage->error = 'TakeposguardAttemptLimitReached';
+	checkHook(invoke($h, new InterceptionInvoice())[0] === 1 && $h->error === 'TakeposguardAttemptLimitReached'
+		&& $h->lock->released === 1, 'Attempt ceiling blocks native action with an actionable error and releases lock');
 	$h = new InterceptionHook(); $h->storage->throws = true;
 	checkHook(invoke($h, new InterceptionInvoice())[0] === 1 && $h->lock->abandoned === 1, 'Uncertain insertion preserves recovery metadata');
 	$h = new InterceptionHook(); $i = new InterceptionInvoice();

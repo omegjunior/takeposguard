@@ -11,6 +11,8 @@ $cases = array(
 	array('days', '0', false), array('days', '3651', false),
 	array('policy', 'reject', true), array('policy', 'allow', false),
 	array('unknown', '120', false),
+	array('attempts', '10', true), array('attempts', '9999', true),
+	array('attempts', '9', false), array('attempts', '10000', false),
 );
 foreach ($cases as $case) {
 	if (takeposguardValidateSetting($case[0], $case[1]) !== $case[2]) {
@@ -23,6 +25,10 @@ require_once __DIR__.'/../core/modules/modTakeposguard.class.php';
 $module = new modTakeposguard(null);
 if ($module->numero !== 501117 || $module->depends !== array('modTakePos') || count($module->rights) !== 2) {
 	fwrite(STDERR, 'Descriptor identity/dependencies/rights failed'.PHP_EOL);
+	exit(1);
+}
+if (count($module->cronjobs) !== 1 || $module->cronjobs[0]['status'] !== 0 || $module->cronjobs[0]['jobtype'] !== 'method') {
+	fwrite(STDERR, 'Scheduled cleanup must be a disabled native method job'.PHP_EOL);
 	exit(1);
 }
 foreach ($module->const as $constant) {
