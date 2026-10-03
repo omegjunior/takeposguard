@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($action, array('recover', 
 		setEventMessages($count === false ? $langs->trans($maintenance->error) : $langs->trans('TakeposguardMaintenancePurged', $count),
 			null, $count === false ? 'errors' : 'mesgs');
 	}
-	header('Location: '.dol_buildpath('/takeposguard/admin/maintenance.php', 1).'?mainmenu=home&leftmenu=admintools');
+	header('Location: '.dol_buildpath('/takeposguard/admin/maintenance.php', 1).'?mainmenu=home&leftmenu=takeposguard');
 	exit;
 }
 $arrayfields = takeposguardListFields(true);
@@ -51,7 +51,7 @@ print '<p class="warning">'.dol_escape_htmltag($langs->trans('TakeposguardMainte
 print '<form method="post" id="searchFormList" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="formfilteraction" value="list">';
 print '<input type="hidden" name="sortfield" value="'.$sortfield.'"><input type="hidden" name="sortorder" value="'.$sortorder.'">';
-print '<input type="hidden" name="mainmenu" value="home"><input type="hidden" name="leftmenu" value="admintools">';
+print '<input type="hidden" name="mainmenu" value="home"><input type="hidden" name="leftmenu" value="takeposguard">';
 print_barre_liste($langs->trans('TakeposguardMaintenance'), $page, $_SERVER['PHP_SELF'], $params, $sortfield, $sortorder, '', $num, '', 'shield-alt', 0, '', '', $limit);
 $selector = $form->multiSelectArrayWithCheckbox('selectedfields', $arrayfields, $contextpage);
 takeposguardListHead($form, $arrayfields, $filters, $selector, $params, $sortfield, $sortorder, true);
@@ -76,7 +76,7 @@ foreach ($rows as $row) {
 			.'<input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="recover">'
 			.'<input type="hidden" name="invoiceid" value="'.((int) $row->fk_invoice).'">'
 			.'<input type="hidden" name="operation_token" value="'.dol_escape_htmltag($row->operation_token).'">'
-			.'<input type="hidden" name="mainmenu" value="home"><input type="hidden" name="leftmenu" value="admintools"></form>';
+			.'<input type="hidden" name="mainmenu" value="home"><input type="hidden" name="leftmenu" value="takeposguard"></form>';
 	} else { print dol_escape_htmltag($langs->trans('TakeposguardMaintenanceRecoveryDenied')); }
 	print '</td></tr>';
 }

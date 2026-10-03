@@ -2,7 +2,7 @@
 
 ## 0.10.1
 
-- Suppression du menu supérieur technique ; audit et maintenance rattachés aux outils d'administration natifs.
+- Suppression du menu supérieur technique ; entrée gauche unique avec icône dans Accueil, puis sous-menus audit/maintenance visibles après sélection du groupe et selon les droits.
 - Listes natives : filtres intégrés, tri et pagination, colonnes sélectionnables et mémorisées par utilisateur avec multiSelectArrayWithCheckbox.
 - Requêtes de filtre et tri bornées et limitées à des champs autorisés ; accès multientité et droits conservés.
 - Boutons de maintenance au style butAction, sans formulaires imbriqués ; raccourcis de configuration après Enregistrer.

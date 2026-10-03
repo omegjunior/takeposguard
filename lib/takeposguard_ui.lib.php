@@ -16,7 +16,7 @@ function takeposguardNavigation($user)
 	global $langs;
 	foreach (array('audit' => '/takeposguard/audit.php', 'maintenance' => '/takeposguard/admin/maintenance.php') as $right => $path) {
 		if (takeposguardCanAccess($user, $right)) {
-			print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath($path, 1).'?mainmenu=home&leftmenu=admintools').'">'
+			print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath($path, 1).'?mainmenu=home&leftmenu=takeposguard').'">'
 				.dol_escape_htmltag($langs->trans($right === 'audit' ? 'TakeposguardAudit' : 'TakeposguardMaintenance')).'</a>';
 		}
 	}
@@ -68,7 +68,7 @@ function takeposguardListFilters($fields)
 /** Filter values also travel with native pagination and sortable title links. */
 function takeposguardListParams($filters, $limit, $invoiceId = 0)
 {
-	$params = '&mainmenu=home&leftmenu=admintools&limit='.((int) $limit);
+	$params = '&mainmenu=home&leftmenu=takeposguard&limit='.((int) $limit);
 	foreach ($filters as $key => $value) { if ($value !== '') { $params .= '&search_'.$key.'='.urlencode($value); } }
 	if ($invoiceId) { $params .= '&invoiceid='.((int) $invoiceId); }
 	return $params;

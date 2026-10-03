@@ -69,3 +69,5 @@ TakeposguardStatusFAILED=Confirmed failure
 TakeposguardStatusBLOCKED=Reconciliation required
 TakeposguardScheduledPurge=Purge old TakePOS Payment Guard details
 TakeposguardScheduledPurgeHelp=Optional daily cleanup, disabled by default, limited to 500 confirmed attempts. Preserves tokens and validation evidence; does not release locks.
+
+TakeposguardMenuHelp=Open the attempt history or maintenance using the links below or the left menu.

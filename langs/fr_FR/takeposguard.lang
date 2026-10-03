@@ -69,3 +69,5 @@ TakeposguardStatusFAILED=Échec confirmé
 TakeposguardStatusBLOCKED=Réconciliation nécessaire
 TakeposguardScheduledPurge=Purger les détails anciens TakePOS Payment Guard
 TakeposguardScheduledPurgeHelp=Nettoyage quotidien facultatif, désactivé par défaut, limité à 500 tentatives confirmées. Conserve les jetons et les preuves de validation ; ne libère aucun verrou.
+
+TakeposguardMenuHelp=Consultez l’historique des tentatives ou accédez à la maintenance depuis les liens ci-dessous ou le menu gauche.
