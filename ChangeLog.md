@@ -1,5 +1,14 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.10.1
+
+- Suppression du menu supérieur technique ; audit et maintenance rattachés aux outils d'administration natifs.
+- Listes natives : filtres intégrés, tri et pagination, colonnes sélectionnables et mémorisées par utilisateur avec multiSelectArrayWithCheckbox.
+- Requêtes de filtre et tri bornées et limitées à des champs autorisés ; accès multientité et droits conservés.
+- Boutons de maintenance au style butAction, sans formulaires imbriqués ; raccourcis de configuration après Enregistrer.
+- Curseurs ajax_constantonoff et selectarray natifs ; aucun écrasement des valeurs AJAX par un formulaire de configuration ancien.
+- Textes FR/EN actualisés après la finalisation ; tests SQL et rendu CLI des composants natifs. Vérification visuelle authentifiée non exécutée.
+
 ## 0.10.0
 
 - Étape 10 : commande de recette locale unique, lint PHP/JavaScript et contrôles du contrat des sources natives.

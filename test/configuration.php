@@ -31,6 +31,12 @@ if (count($module->cronjobs) !== 1 || $module->cronjobs[0]['status'] !== 0 || $m
 	fwrite(STDERR, 'Scheduled cleanup must be a disabled native method job'.PHP_EOL);
 	exit(1);
 }
+foreach ($module->menu as $menu) {
+	if ($menu['type'] !== 'left' || $menu['fk_menu'] !== 'fk_mainmenu=home,fk_leftmenu=admintools') {
+		fwrite(STDERR, 'Technical module menus must stay under administration tools'.PHP_EOL);
+		exit(1);
+	}
+}
 foreach ($module->const as $constant) {
 	if ($constant[5] !== 'current' || $constant[6] !== 0) {
 		fwrite(STDERR, 'Configuration entity/persistence failed'.PHP_EOL);

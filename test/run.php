@@ -31,7 +31,7 @@ try {
 	acceptanceCommand(array('node', '--check', 'js/takeposguard.js'));
 	acceptanceCommand(array('node', 'test/javascript.cjs'));
 	if (in_array('--mysql', $argv, true)) {
-		foreach (array('storage', 'locks', 'native_acceptance') as $test) {
+		foreach (array('storage', 'locks', 'native_acceptance', 'ui') as $test) {
 			acceptanceCommand(array(PHP_BINARY, 'test/'.$test.'.php', '--mysql'));
 		}
 	} else {

@@ -56,6 +56,9 @@ if (!$res) {
 }
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/lib/ajax.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
+$form = new Form($db);
 require_once __DIR__.'/../lib/takeposguard.lib.php';
 $langs->loadLangs(array('admin', 'takeposguard@takeposguard'));
 
@@ -81,6 +84,7 @@ foreach ($settings as $name => $setting) {
 if ($action === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	$error = 0;
 	foreach ($settings as $name => $setting) {
+		if ($setting[0] === 'boolean' && !empty($conf->use_javascript_ajax)) { continue; }
 		$values[$name] = GETPOST($name, 'alphanohtml');
 		if (!takeposguardValidateSetting($setting[0], $values[$name])) {
 			$error++;
@@ -92,6 +96,8 @@ if ($action === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 			$error++;
 		} else {
 			foreach ($values as $name => $value) {
+				// Native AJAX switches persist separately; never overwrite them with the page snapshot.
+				if ($settings[$name][0] === 'boolean' && !empty($conf->use_javascript_ajax)) { continue; }
 				if (dolibarr_set_const($db, $name, $value, 'chaine', 0, '', $conf->entity) <= 0) {
 					$error++;
 					break;
@@ -118,8 +124,6 @@ if ($action === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 llxHeader('', $langs->trans('TakeposguardSetup'));
 print load_fiche_titre($langs->trans('TakeposguardSetup'), '<a href="'.DOL_URL_ROOT.'/admin/modules.php">'.$langs->trans('BackToModuleList').'</a>', 'title_setup');
 print dol_get_fiche_head(takeposguardAdminPrepareHead(), 'settings', $langs->trans('ModuleTakeposguardName'), -1, 'shield-alt');
-print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/audit.php', 1)).'">'.dol_escape_htmltag($langs->trans('TakeposguardAudit')).'</a>';
-print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/admin/maintenance.php', 1)).'">'.dol_escape_htmltag($langs->trans('TakeposguardMaintenance')).'</a>';
 print '<div class="warning">'.$langs->trans('TakeposguardConfigurationOnly').'</div>';
 print '<form method="post" action="'.dol_buildpath('/takeposguard/admin/setup.php', 1).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
@@ -129,13 +133,13 @@ foreach ($settings as $name => $setting) {
 	print '<tr class="oddeven"><td><label for="'.$name.'">'.$langs->trans($setting[2]).'</label><br>';
 	print '<span class="opacitymedium">'.$langs->trans($setting[2].'Help').'</span></td><td>';
 	if ($setting[0] === 'boolean') {
-		print '<select id="'.$name.'" name="'.$name.'">';
-		foreach (array('0' => 'No', '1' => 'Yes') as $value => $label) {
-			print '<option value="'.$value.'"'.((string) $values[$name] === (string) $value ? ' selected' : '').'>'.$langs->trans($label).'</option>';
+		if (!empty($conf->use_javascript_ajax)) {
+			print ajax_constantonoff($name, array(), $conf->entity, 0, 0, 0, 2, 0, 1);
+		} else {
+			print $form->selectyesno($name, $values[$name]);
 		}
-		print '</select>';
 	} elseif ($setting[0] === 'policy') {
-		print '<select id="'.$name.'" name="'.$name.'"><option value="reject">'.$langs->trans('TakeposguardRejectMissingToken').'</option></select>';
+		print $form->selectarray($name, array('reject' => $langs->trans('TakeposguardRejectMissingToken')), $values[$name], 0);
 	} else {
 		$min = ($setting[0] === 'seconds' ? 10 : 1);
 		$max = ($setting[0] === 'seconds' ? 3600 : ($setting[0] === 'attempts' ? 9999 : 3650));
@@ -145,6 +149,10 @@ foreach ($settings as $name => $setting) {
 	print '</td></tr>';
 }
 print '</table><div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div></form>';
+print '<div class="tabsAction">';
+print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/audit.php', 1).'?mainmenu=home&leftmenu=admintools').'">'.dol_escape_htmltag($langs->trans('TakeposguardAudit')).'</a>';
+print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/admin/maintenance.php', 1).'?mainmenu=home&leftmenu=admintools').'">'.dol_escape_htmltag($langs->trans('TakeposguardMaintenance')).'</a>';
+print '</div>';
 print dol_get_fiche_end();
 llxFooter();
 $db->close();

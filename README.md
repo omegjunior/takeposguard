@@ -2,7 +2,7 @@
 
 Module externe indépendant installé dans `htdocs/custom/takeposguard`, sans modification du cœur Dolibarr.
 
-## État de la version 0.10.0
+## État de la version 0.10.1
 
 Cette version implémente les points 1 à 9 et ajoute la recette automatisée du point 10 : configuration, stockage, verrou exclusif, interception serveur, protection du stock lors des paiements partiels, protection JavaScript, finalisation, récupération, audit et maintenance. Les résultats confirmés en base deviennent `SUCCESS` ou `FAILED` après la transaction native ; une situation ambiguë devient `BLOCKED`. La protection reste à valider sur une instance de recette avant production : les tests natifs CLI de paiement/banque/stock et concurrence sont exécutés, mais la recette HTTP authentifiée reste à réaliser. Voir le [rapport de recette](docs/acceptance-report.md). L’option désactivée conserve l’action native. Aucun trigger n’est ajouté.
 
@@ -16,6 +16,16 @@ Cette version implémente les points 1 à 9 et ajoute la recette automatisée du
 La version locale inspectée est 22.0.5. Le contrôle des sources et la recette native locale passent sur cette version ; 22.0.4 et les autres versions ne sont pas certifiées par ces résultats. Relancer les contrôles et la recette HTTP sur chaque version déployée.
 
 Pour une installation déjà activée en 0.1.0, désactiver puis réactiver le module afin de charger les nouvelles tables. La configuration reste conservée. Les tables et l'historique ne sont pas supprimés lors de la désactivation.
+
+## Interfaces d'administration (0.10.1)
+
+Le module technique n'ajoute plus de menu supérieur. Ses liens **Historique des tentatives** et **Maintenance** sont rattachés à **Accueil > Outils d'administration**, selon les droits du module et l'accès au menu parent natif. Les URL directes restent soumises aux droits habituels. Pour migrer les entrées de menu depuis 0.10.0, désactiver puis réactiver le module hors encaissement ; sa configuration et son historique sont conservés.
+
+Les deux listes utilisent les composants Dolibarr : filtres dans le tableau, boutons recherche/réinitialisation, tri, pagination bornée à 100 lignes et sélecteur de colonnes. La sélection est enregistrée dans les préférences de chaque utilisateur, séparément pour l'audit et la maintenance. Les dates filtrent une journée, les montants une valeur exacte (point ou virgule), les textes utilisent la recherche native. Masquer une colonne ne supprime pas son filtre actif ; le bouton de réinitialisation vide tous les filtres. La maintenance conserve ses POST CSRF et le propriétaire exact du verrou.
+
+Dans la configuration, les curseurs enregistrent immédiatement les deux paramètres binaires via l'API native Dolibarr. Le bouton **Enregistrer** valide les autres paramètres et n'écrase pas les valeurs des curseurs avec celles chargées à l'ouverture de la page. Sans JavaScript AJAX, le sélecteur oui/non natif est enregistré avec le formulaire. Les liens audit et maintenance sont placés après Enregistrer.
+
+`php test/ui.php --mysql` vérifie le rendu PHP des vrais composants Form, les préférences de colonnes et l'échappement des filtres masqués ; ce test n'écrit pas de configuration. Il est inclus dans `php test/run.php --mysql`. La recette dans un navigateur authentifié reste nécessaire pour confirmer le rendu du thème, les curseurs AJAX et la persistance des préférences via HTTP.
 
 ## Configuration par entité
 
@@ -200,7 +210,7 @@ Sur une instance de recette, activer la protection et exécuter deux appels HTTP
 
 Après mise à jour, désactiver puis réactiver **le module** depuis Configuration > Modules/Applications pour installer les menus, la nouvelle constante et la tâche planifiée. Faire cette opération hors encaissement. La constante `TAKEPOSGUARD_ENABLE` et les historiques sont conservés ; aucun changement de schéma SQL n’est requis pour passer de 0.7 à 0.9.
 
-Le menu TakePOS Payment Guard ouvre `audit.php` pour un utilisateur avec `audit/read`, ou la maintenance si son seul droit est `maintenance/write`. Les administrateurs ont accès aux deux. Les utilisateurs externes sont refusés. Ces droits restent distincts des droits de paiement : un caissier peut bénéficier de la protection sans lire l’historique général ni administrer les verrous. Les contrôles sont exécutés sur chaque page, même lors d’un accès direct par URL.
+Les outils d’administration proposent `audit.php` pour un utilisateur avec `audit/read` et la maintenance pour un utilisateur avec `maintenance/write`. Les administrateurs ont accès aux deux. Les utilisateurs externes sont refusés. Ces droits restent distincts des droits de paiement : un caissier peut bénéficier de la protection sans lire l’historique général ni administrer les verrous. Les contrôles sont exécutés sur chaque page, même lors d’un accès direct par URL.
 
 L’audit affiche date, facture, terminal, utilisateur, mode, montant demandé et constaté, statut traduit, UUID tronqué, soldes avant/après et code/message d’erreur. Les filtres portent sur le statut et l’identifiant de facture ; la pagination est limitée à 50 lignes par page, avec requête SQL bornée. Les références de facture et comptes utilisateur sont chargés par jointure ; toutes les valeurs affichées sont échappées. Un montant demandé est une information d’audit, sans preuve de paiement. Les montants utilisent la devise principale de la facture.
 

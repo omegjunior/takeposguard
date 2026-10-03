@@ -34,7 +34,7 @@ class modTakeposguard extends DolibarrModules
 		$this->module_position = '90';
 		$this->name = 'Takeposguard';
 		$this->description = 'ModuleTakeposguardDesc';
-		$this->version = '0.10.0';
+		$this->version = '0.10.1';
 		$this->editor_name = 'Fred Omega Junior';
 		$this->const_name = 'MAIN_MODULE_TAKEPOSGUARD';
 		$this->picto = 'fa-shield-alt';
@@ -68,14 +68,11 @@ class modTakeposguard extends DolibarrModules
 			array(50111702, 'TakeposguardMaintain', 'w', 0, 'maintenance', 'write'),
 		);
 		$this->menu = array(
-			array('fk_menu' => '', 'type' => 'top', 'titre' => 'ModuleTakeposguardName', 'mainmenu' => 'takeposguard',
-				'leftmenu' => '', 'url' => '/takeposguard/takeposguardindex.php', 'langs' => 'takeposguard@takeposguard', 'position' => 100,
-				'enabled' => 'isModEnabled("takeposguard")', 'perms' => '$user->admin || $user->hasRight("takeposguard", "audit", "read") || $user->hasRight("takeposguard", "maintenance", "write")', 'target' => '', 'user' => 0),
-			array('fk_menu' => 'fk_mainmenu=takeposguard', 'type' => 'left', 'titre' => 'TakeposguardAudit', 'mainmenu' => 'takeposguard',
-				'leftmenu' => 'takeposguardaudit', 'url' => '/takeposguard/audit.php', 'langs' => 'takeposguard@takeposguard', 'position' => 101,
+			array('fk_menu' => 'fk_mainmenu=home,fk_leftmenu=admintools', 'type' => 'left', 'titre' => 'TakeposguardAudit', 'mainmenu' => 'home',
+				'leftmenu' => 'takeposguardaudit', 'url' => '/takeposguard/audit.php?mainmenu=home&leftmenu=admintools', 'langs' => 'takeposguard@takeposguard', 'position' => 101,
 				'enabled' => 'isModEnabled("takeposguard")', 'perms' => '$user->admin || $user->hasRight("takeposguard", "audit", "read")', 'target' => '', 'user' => 0),
-			array('fk_menu' => 'fk_mainmenu=takeposguard', 'type' => 'left', 'titre' => 'TakeposguardMaintenance', 'mainmenu' => 'takeposguard',
-				'leftmenu' => 'takeposguardmaintenance', 'url' => '/takeposguard/admin/maintenance.php', 'langs' => 'takeposguard@takeposguard', 'position' => 102,
+			array('fk_menu' => 'fk_mainmenu=home,fk_leftmenu=admintools', 'type' => 'left', 'titre' => 'TakeposguardMaintenance', 'mainmenu' => 'home',
+				'leftmenu' => 'takeposguardmaintenance', 'url' => '/takeposguard/admin/maintenance.php?mainmenu=home&leftmenu=admintools', 'langs' => 'takeposguard@takeposguard', 'position' => 102,
 				'enabled' => 'isModEnabled("takeposguard")', 'perms' => '$user->admin || $user->hasRight("takeposguard", "maintenance", "write")', 'target' => '', 'user' => 0),
 		);
 		$this->cronjobs = array(

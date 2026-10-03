@@ -329,6 +329,12 @@ try {
 	storageCheck(count($audited) === 1 && $audited[0]->user_login === 'cashier' && $audited[0]->invoice_ref === '<img src=x onerror=alert(1)>', 'Audit joins invoice/user once with authoritative outcome');
 	storageCheck($audit->attempts("SUCCESS' OR 1=1", 0) === false, 'Audit rejects unsafe status filter');
 	storageCheck($audit->attempts('', 3) === array(), 'Audit never reads another entity invoice');
+	storageCheck(count($audit->attempts('', 0, 0, 50, array('user_login' => 'cashier', 'invoice' => 'img'))) === 1, 'Native text filters combine with entity scope');
+	storageCheck(count($audit->attempts('', 20, 0, 50, array('remain_before' => (string) $audited[0]->remain_before))) === 1, 'Exact amount filter accepts persisted value');
+	storageCheck($audit->attempts('', 0, 0, 50, array('remain_before' => '0 OR 1=1')) === array(), 'Invalid amount filter never widens results');
+	storageCheck($audit->attempts('', 0, 0, 50, array('datec' => '2026-02-31')) === array(), 'Invalid calendar date fails closed');
+	storageCheck(count($audit->attempts('', 20, 0, 50, array(), 'datec DESC; DROP TABLE facture', 'ASC; DELETE')) === 1, 'Sorting uses only fixed SQL identifiers and directions');
+	storageCheck($audit->locks(0, 50, array('status' => "SUCCESS' OR 1=1")) === array(), 'Invalid maintenance status cannot widen lock list');
 	class MaintenanceFixtureRepository extends TakeposguardMaintenance {
 		protected function loadInvoice($id) {
 			$result = $this->db->query('SELECT * FROM '.MAIN_DB_PREFIX.'facture WHERE rowid='.((int) $id));
