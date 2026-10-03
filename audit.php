@@ -32,13 +32,12 @@ $params = takeposguardListParams($filters, $limit, $invoiceId);
 
 /* Views */
 llxHeader('', $langs->trans('TakeposguardAudit'));
-takeposguardNavigation($user);
-print '<p class="opacitymedium">'.dol_escape_htmltag($langs->trans('TakeposguardAuditRetentionHelp')).'</p>';
 print '<form method="post" id="searchFormList" action="'.dol_escape_htmltag($_SERVER['PHP_SELF']).'">';
 print '<input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="formfilteraction" value="list">';
 print '<input type="hidden" name="sortfield" value="'.$sortfield.'"><input type="hidden" name="sortorder" value="'.$sortorder.'">';
 print '<input type="hidden" name="mainmenu" value="home"><input type="hidden" name="leftmenu" value="takeposguard">';
 print_barre_liste($langs->trans('TakeposguardAudit'), $page, $_SERVER['PHP_SELF'], $params, $sortfield, $sortorder, '', $num, '', 'shield-alt', 0, '', '', $limit);
+print '<p class="opacitymedium">'.dol_escape_htmltag($langs->trans('TakeposguardAuditRetentionHelp')).'</p>';
 $selector = $form->multiSelectArrayWithCheckbox('selectedfields', $arrayfields, $contextpage);
 takeposguardListHead($form, $arrayfields, $filters, $selector, $params, $sortfield, $sortorder, false, $invoiceId);
 $columns = 1;

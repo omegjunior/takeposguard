@@ -2,6 +2,8 @@
 
 ## 0.10.2
 
+- En-têtes des listes recentrés sur print_barre_liste : suppression des raccourcis redondants avec le menu gauche, informations placées sous le titre natif.
+
 - Calendriers natifs Form::selectDate sur les filtres de date de l'audit et de la maintenance.
 - Champs texte de recherche rendus par CommonObject::showInputField via un adaptateur sans persistance ; statuts conservés avec Form::selectarray.
 - Lecture des composants jour/mois/année, maintien des filtres dans la pagination et lors du masquage des colonnes, réinitialisation et dates invalides bloquées.
