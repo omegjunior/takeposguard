@@ -148,10 +148,9 @@ foreach ($settings as $name => $setting) {
 	}
 	print '</td></tr>';
 }
-print '</table><div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></div></form>';
-print '<div class="tabsAction">';
-print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/audit.php', 1).'?mainmenu=home&leftmenu=admintools').'">'.dol_escape_htmltag($langs->trans('TakeposguardAudit')).'</a>';
-print '<a class="butAction" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/admin/maintenance.php', 1).'?mainmenu=home&leftmenu=admintools').'">'.dol_escape_htmltag($langs->trans('TakeposguardMaintenance')).'</a>';
+print '</table><div class="center"><input type="submit" class="button" value="'.$langs->trans('Save').'"></form>';
+print '<a class="button" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/audit.php', 1).'?mainmenu=home&leftmenu=admintools').'">'.dol_escape_htmltag($langs->trans('TakeposguardAudit')).'</a>';
+print '<a class="button" href="'.dol_escape_htmltag(dol_buildpath('/takeposguard/admin/maintenance.php', 1).'?mainmenu=home&leftmenu=admintools').'">'.dol_escape_htmltag($langs->trans('TakeposguardMaintenance')).'</a>';
 print '</div>';
 print dol_get_fiche_end();
 llxFooter();
