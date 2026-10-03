@@ -1,5 +1,12 @@
 # CHANGELOG MODULE TAKEPOSGUARD FOR [DOLIBARR ERP CRM](https://www.dolibarr.org)
 
+## 0.10.2
+
+- Calendriers natifs Form::selectDate sur les filtres de date de l'audit et de la maintenance.
+- Champs texte de recherche rendus par CommonObject::showInputField via un adaptateur sans persistance ; statuts conservés avec Form::selectarray.
+- Lecture des composants jour/mois/année, maintien des filtres dans la pagination et lors du masquage des colonnes, réinitialisation et dates invalides bloquées.
+- Tests de rendu natif, échappement et aller-retour des dates ; aucune modification du traitement des paiements ou des schémas.
+
 ## 0.10.1
 
 - Suppression du menu supérieur technique ; entrée gauche unique avec icône dans Accueil, puis sous-menus audit/maintenance visibles après sélection du groupe et selon les droits.

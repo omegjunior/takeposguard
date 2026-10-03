@@ -2,7 +2,7 @@
 
 Module externe indépendant installé dans `htdocs/custom/takeposguard`, sans modification du cœur Dolibarr.
 
-## État de la version 0.10.1
+## État de la version 0.10.2
 
 Cette version implémente les points 1 à 9 et ajoute la recette automatisée du point 10 : configuration, stockage, verrou exclusif, interception serveur, protection du stock lors des paiements partiels, protection JavaScript, finalisation, récupération, audit et maintenance. Les résultats confirmés en base deviennent `SUCCESS` ou `FAILED` après la transaction native ; une situation ambiguë devient `BLOCKED`. La protection reste à valider sur une instance de recette avant production : les tests natifs CLI de paiement/banque/stock et concurrence sont exécutés, mais la recette HTTP authentifiée reste à réaliser. Voir le [rapport de recette](docs/acceptance-report.md). L’option désactivée conserve l’action native. Aucun trigger n’est ajouté.
 
@@ -21,7 +21,7 @@ Pour une installation déjà activée en 0.1.0, désactiver puis réactiver le m
 
 Le module technique n'ajoute plus de menu supérieur. Ses liens **Historique des tentatives** et **Maintenance** sont rattachés à **Accueil > Outils d'administration**, selon les droits du module et l'accès au menu parent natif. Les URL directes restent soumises aux droits habituels. Pour migrer les entrées de menu depuis une version précédente, désactiver puis réactiver le module hors encaissement ; sa configuration et son historique sont conservés.
 
-Les deux listes utilisent les composants Dolibarr : filtres dans le tableau, boutons recherche/réinitialisation, tri, pagination bornée à 100 lignes et sélecteur de colonnes. La sélection est enregistrée dans les préférences de chaque utilisateur, séparément pour l'audit et la maintenance. Les dates filtrent une journée, les montants une valeur exacte (point ou virgule), les textes utilisent la recherche native. Masquer une colonne ne supprime pas son filtre actif ; le bouton de réinitialisation vide tous les filtres. La maintenance conserve ses POST CSRF et le propriétaire exact du verrou.
+Les deux listes utilisent les composants Dolibarr : filtres dans le tableau, boutons recherche/réinitialisation, tri, pagination bornée à 100 lignes et sélecteur de colonnes. La sélection est enregistrée dans les préférences de chaque utilisateur, séparément pour l'audit et la maintenance. Les champs utilisent le rendu natif `CommonObject::showInputField`, les statuts `Form::selectarray` et les dates `Form::selectDate` avec son calendrier. Les dates filtrent une journée, les montants une valeur exacte (point ou virgule), les textes utilisent la recherche native. Masquer une colonne ne supprime pas son filtre actif ; le bouton de réinitialisation vide tous les filtres. La maintenance conserve ses POST CSRF et le propriétaire exact du verrou.
 
 Dans la configuration, les curseurs enregistrent immédiatement les deux paramètres binaires via l'API native Dolibarr. Le bouton **Enregistrer** valide les autres paramètres et n'écrase pas les valeurs des curseurs avec celles chargées à l'ouverture de la page. Sans JavaScript AJAX, le sélecteur oui/non natif est enregistré avec le formulaire. Les liens audit et maintenance sont placés après Enregistrer.
 

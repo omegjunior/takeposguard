@@ -61,6 +61,14 @@ function takeposguardListFilters($fields)
 	$filters = array();
 	foreach ($fields as $key => $field) {
 		$filters[$key] = GETPOST('button_removefilter_x', 'aZ09') ? '' : GETPOST('search_'.$key, 'alphanohtml');
+		if (in_array($key, array('datec', 'expires_at'), true) && !GETPOST('button_removefilter_x', 'aZ09')
+			&& GETPOSTISSET('search_'.$key.'day')) {
+			$day = GETPOSTINT('search_'.$key.'day');
+			$month = GETPOSTINT('search_'.$key.'month');
+			$year = GETPOSTINT('search_'.$key.'year');
+			$filters[$key] = !$day && !$month && !$year ? ''
+				: (checkdate($month, $day, $year) ? sprintf('%04d-%02d-%02d', $year, $month, $day) : 'invalid');
+		}
 	}
 	return $filters;
 }
@@ -78,6 +86,8 @@ function takeposguardListParams($filters, $limit, $invoiceId = 0)
 function takeposguardListHead($form, $fields, $filters, $selector, $params, $sortfield, $sortorder, $locks = false, $invoiceId = 0)
 {
 	global $langs;
+	require_once __DIR__.'/../class/takeposguardlistform.class.php';
+	$input = new TakeposguardListForm($form->db);
 	foreach ($fields as $key => $field) {
 		if (!empty($field['checked'])) { continue; }
 		// Keep active filters when their column is hidden; clear-filter resets them.
@@ -93,11 +103,18 @@ function takeposguardListHead($form, $fields, $filters, $selector, $params, $sor
 			foreach (array('PROCESSING', 'SUCCESS', 'FAILED', 'BLOCKED') as $status) { $options[$status] = $langs->trans('TakeposguardStatus'.$status); }
 			if ($locks) { $options['ORPHAN'] = $langs->trans('TakeposguardOrphanLock'); }
 			print $form->selectarray('search_status', $options, $filters[$key], 0, 0, 0, '', 0, 0, 0, '', 'maxwidth150');
+		} elseif (in_array($key, array('datec', 'expires_at'), true)) {
+			$date = -1;
+			if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/D', $filters[$key], $parts)
+				&& checkdate((int) $parts[2], (int) $parts[3], (int) $parts[1])) {
+				$date = dol_mktime(12, 0, 0, (int) $parts[2], (int) $parts[3], (int) $parts[1], 'tzserver');
+			}
+			print '<div class="nowrapfordate">'.$form->selectDate($date, 'search_'.$key, 0, 0, 1, 'searchFormList', 1, 0, 0,
+				'', '', '', '', 1, '', '', 'tzserver').'</div>';
 		} else {
-			$type = in_array($key, array('datec', 'expires_at'), true) ? 'date' : 'text';
-			print '<input class="flat maxwidth100" type="'.$type.'" name="search_'.$key.'" value="'.dol_escape_htmltag($filters[$key]).'" aria-label="'.dol_escape_htmltag($langs->trans($field['label'])).'">';
+			print $input->input($key, $filters[$key], $langs->trans($field['label']));
 			if ($key === 'invoice' && !$locks) {
-				print '<input class="flat maxwidth75" type="number" min="1" name="invoiceid" value="'.($invoiceId ?: '').'" placeholder="'.dol_escape_htmltag($langs->trans('TakeposguardInvoiceId')).'">';
+				print $input->input('invoiceid', $invoiceId ?: '', $langs->trans('TakeposguardInvoiceId'), '');
 			}
 		}
 		print '</td>';
